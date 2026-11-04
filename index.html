@@ -5,43 +5,45 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Panel Central · Prep Diplomacia Uy</title>
 <meta name="description" content="Panel de gestión centralizado de Prep Diplomacia Uy y Carolina Techera RRII.">
+<meta name="theme-color" content="#153D63">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&family=Open+Sans:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/styles.css">
+<script>try{var t=localStorage.getItem('panel-central-theme');if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
 </head>
 <body>
 <div class="app">
   <aside class="sidebar" id="sidebar">
-    <div class="logo">
+    <div class="brand">
       <div class="iso">PD</div>
-      <div><strong>Panel Central</strong><span>Prep Diplomacia Uy · Carolina Techera RRII</span></div>
+      <div><strong>Panel Central</strong><span>Prep Diplomacia Uy<br>Carolina Techera RRII</span></div>
     </div>
-    <nav id="nav"></nav>
-    <div class="side-foot">Datos guardados en este navegador.<br><a href="#ajustes">Copia de seguridad</a></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot" id="sideFoot"></div>
   </aside>
   <div class="main-wrap">
     <header class="topbar">
-      <button class="icon-btn menu-btn" data-action="menu" aria-label="Menú">☰</button>
-      <div class="brand-filter" id="brandFilter"></div>
-      <input type="search" id="search" placeholder="Buscar en todo el panel…" aria-label="Buscar">
-      <div class="quick">
-        <button class="btn primary" data-action="quick">+ Nuevo</button>
-        <div class="quick-menu" id="quickMenu" hidden>
-          <button data-action="new" data-entity="tasks">Tarea</button>
-          <button data-action="new" data-entity="posts">Publicación</button>
-          <button data-action="new" data-entity="transactions">Movimiento contable</button>
-          <button data-action="new" data-entity="projects">Proyecto</button>
-          <button data-action="new" data-entity="metrics">Registro de métrica</button>
-          <button data-action="new" data-entity="contacts">Contacto</button>
-          <button data-action="new" data-entity="resources">Recurso o enlace</button>
-        </div>
-      </div>
+      <button class="iconbtn menu-btn" data-action="menu" aria-label="Abrir menú"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+      <div class="seg" id="brandFilter" role="group" aria-label="Filtrar por marca"></div>
+      <button class="searchbtn" data-action="palette" aria-label="Buscar o ejecutar un comando">
+        <svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+        <span>Buscar o ir a…</span><kbd>Ctrl K</kbd>
+      </button>
+      <span class="spacer"></span>
+      <button class="iconbtn" data-action="theme" aria-label="Cambiar tema claro u oscuro" id="themeBtn"></button>
+      <button class="btn primary" data-action="palette" data-mode="new"><svg class="i" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nuevo</button>
     </header>
     <main id="main"></main>
   </div>
 </div>
-<div class="modal-bg" id="modal" hidden><div class="modal" role="dialog" aria-modal="true" id="modalBox"></div></div>
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" hidden role="dialog" aria-modal="true"></aside>
+<div class="palette" id="palette" hidden role="dialog" aria-modal="true">
+  <input id="paletteInput" placeholder="Busca tareas, alumnos, proyectos… o escribe un comando" autocomplete="off">
+  <div class="res" id="paletteRes"></div>
+  <div class="foot"><span><kbd>↑</kbd> <kbd>↓</kbd> moverse</span><span><kbd>Enter</kbd> abrir</span><span><kbd>Esc</kbd> cerrar</span></div>
+</div>
 <div class="toast" id="toast" hidden></div>
 <input type="file" id="importFile" accept="application/json" hidden>
 <script src="assets/app.js"></script>
