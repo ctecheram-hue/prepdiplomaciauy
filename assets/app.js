@@ -332,6 +332,7 @@
   let S = REMOTE ? null : load();
   function save() {
     if (REMOTE) return queueRemoteSave();
+    if (LIVE.on) return dbSave();
     try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('No se pudo guardar en este navegador'); }
   }
 
@@ -380,6 +381,11 @@
     } catch (e) { setSync('error', 'Sin conexión con la web, reintentando…'); }
   }
   function footHtml() {
+    if (LIVE.on) {
+      const err = Object.values(LIVE.src).some((x) => x.state === 'error' || x.state === 'blocked');
+      const saving = LIVE.queue.size || LIVE.writing;
+      return `<span class="row" style="gap:6px"><span class="dot" style="background:${saving ? 'var(--warn)' : err ? 'var(--bad)' : 'var(--ok)'}"></span>${saving ? 'Guardando…' : LIVE.busy ? 'Actualizando…' : 'Sincronizado' + (LIVE.at ? ' · ' + hhmm(LIVE.at) + ' hs' : '')}</span><div style="margin-top:4px"><a href="#ajustes">Conexiones</a> · <a href="#" data-action="live-refresh">Actualizar</a></div>`;
+    }
     if (!REMOTE) return 'Datos guardados en este navegador · <a href="#ajustes">Copia de seguridad</a>';
     const t = sync.at ? `${pad(sync.at.getHours())}:${pad(sync.at.getMinutes())} hs` : '';
     const dot = sync.state === 'error' ? 'var(--bad)' : sync.state === 'saving' ? 'var(--warn)' : 'var(--ok)';
@@ -722,6 +728,15 @@
     agFail.filter((a) => a.id !== 'ag-corr').forEach((a) => attn.push(['bad', 'agentes', `Falla en ${a.name}`, a.lastNote || 'Revisa la última corrida.', '#agentes']));
     if (late.length) attn.push(['bad', 'tareas', `${plural(late.length, 'tarea vencida', 'tareas vencidas')}`, late.slice(0, 2).map((t) => t.title).join(' · '), '#tareas']);
     if (fu.length) attn.push(['info', 'contactos', `${plural(fu.length, 'seguimiento pendiente', 'seguimientos pendientes')}`, fu.slice(0, 2).map((c) => c.name).join(' · '), '#contactos']);
+    if (LIVE.mcp) {
+      const waiting = LIVE.sessions.filter((x) => x.needs || /BLOCKED/.test(x.bucket));
+      if (waiting.length) attn.push(['ia', 'agentes', `${plural(waiting.length, 'conversación', 'conversaciones')} de Claude ${waiting.length === 1 ? 'espera' : 'esperan'} tu respuesta`, waiting.slice(0, 2).map((x) => x.title).join(' · '), '#agentes']);
+      const dev = LIVE.events.filter((e) => evKind(e) === 'devolucion' && iso(evStart(e)) === today());
+      if (dev.length) attn.push(['warn', 'agenda', `${plural(dev.length, 'devolución', 'devoluciones')} con alumnos hoy`, dev.map((e) => hhmm(evStart(e)) + ' hs').join(' · '), '#agenda']);
+      const bad = Object.entries(LIVE.src).filter(([, v]) => v.state === 'error' || v.state === 'blocked');
+      if (bad.length) attn.push(['bad', 'ajustes', 'Hay conexiones que revisar', bad.map(([, v]) => v.msg).join(' '), '#ajustes']);
+      if (S.settings.mailEnabled && LIVE.mail.length) attn.push(['info', 'inbox', `${plural(LIVE.mail.length, 'correo pendiente', 'correos pendientes')}`, LIVE.mail.slice(0, 2).map((m) => m.subject).join(' · '), '#agentes']);
+    }
     if (f.pend > 0) attn.push(['info', 'contabilidad', `${money(f.pend)} por cobrar este mes`, 'Ingresos marcados como pendientes.', '#contabilidad']);
     const wfAgenda = byBrand(S.items).filter((i) => i.due === today() && i.owner === 'Agente IA');
     if (wfAgenda.length) attn.push(['ia', 'agentes', `${plural(wfAgenda.length, 'propuesta', 'propuestas')} de los agentes para elegir hoy`, wfAgenda.map((i) => i.title).slice(0, 2).join(' · '), '#workflows']);
@@ -763,11 +778,11 @@
         </div>
         <div class="stack">
           <div class="card"><div class="ch"><h2>${icon('gcal')}Tu agenda</h2><a class="btn sm" href="#agenda">Abrir</a></div>
-            <iframe class="gcal" src="${esc(gcalEmbed('AGENDA'))}" height="340" loading="lazy" title="Google Calendar"></iframe>
-            <div class="small muted" style="margin-top:6px">Desde Google Calendar. Si no ves tus eventos, inicia sesión en Google en este navegador.</div>
+            ${LIVE.mcp ? liveAgendaHtml(2) : `<iframe class="gcal" src="${esc(gcalEmbed('AGENDA'))}" height="340" loading="lazy" title="Google Calendar"></iframe>
+            <div class="small muted" style="margin-top:6px">Desde Google Calendar. Si no ves tus eventos, inicia sesión en Google en este navegador.</div>`}
           </div>
-          <div class="card"><div class="ch"><h2>${icon('inbox')}Actividad reciente</h2><span class="pill ${REMOTE ? 'ok' : ''}">${REMOTE ? 'En vivo' : 'Local'}</span></div>
-            ${S.activity.length ? `<ul class="list">${S.activity.slice(0, 6).map((a) => { const d = new Date(a.at); return `<li><span class="dot" style="background:${a.kind === 'bad' ? 'var(--bad)' : a.kind === 'ia' ? 'var(--ia)' : 'var(--ok)'}"></span><div class="grow"><div class="t" style="font-weight:600;font-size:13px">${esc(a.text)}</div><div class="m">${esc(a.source)} · ${fmtDate(iso(d))} ${pad(d.getHours())}:${pad(d.getMinutes())} hs</div></div></li>`; }).join('')}</ul>` : `<div class="empty">${REMOTE ? 'Aquí aparece lo que tus agentes de Claude envían al panel.' : 'Cuando el panel esté en tu web, aquí aparece en vivo lo que hacen tus agentes de Claude.'}</div>`}
+          <div class="card"><div class="ch"><h2>${icon('inbox')}Actividad reciente</h2><span class="pill ${REMOTE || LIVE.mcp ? 'ok' : ''}">${REMOTE || LIVE.mcp ? 'En vivo' : 'Local'}</span></div>
+            ${S.activity.length ? `<ul class="list">${S.activity.slice(0, 6).map((a) => { const d = new Date(a.at); return `<li><span class="dot" style="background:${a.kind === 'bad' ? 'var(--bad)' : a.kind === 'ia' ? 'var(--ia)' : 'var(--ok)'}"></span><div class="grow"><div class="t" style="font-weight:600;font-size:13px">${esc(a.text)}</div><div class="m">${esc(a.source)} · ${fmtDate(iso(d))} ${pad(d.getHours())}:${pad(d.getMinutes())} hs</div></div></li>`; }).join('')}</ul>` : `<div class="empty">${REMOTE || LIVE.mcp ? 'Aquí aparece lo que hacen tus agentes, tu agenda y tus sesiones de Claude.' : 'En la versión publicada en Claude, aquí aparece en vivo lo que hacen tus agentes.'}</div>`}
           </div>
           <div class="card"><div class="ch"><h2>${icon('agentes')}Agentes de hoy</h2><a class="btn sm" href="#agentes">Ver</a></div>
             <div class="timeline">${agToday.map((a) => `<div class="tl ${a.lastStatus}"><div class="row between"><span class="h">${esc(a.time)} hs <span class="muted small" style="font-weight:600">${esc(a.tz)}</span></span>${a.lastStatus === 'falla' ? '<span class="pill bad">Falla</span>' : ''}</div><div class="small">${esc(a.name)}</div></div>`).join('') || '<div class="empty">Sin agentes</div>'}</div>
@@ -781,7 +796,10 @@
 
   VIEWS.agenda = () => {
     const tab = ui.agendaTab;
-    const tabs = `<div class="seg"><button class="${tab === 'google' ? 'active' : ''}" data-action="set" data-k="agendaTab" data-v="google">${icon('gcal')}Google Calendar</button><button class="${tab === 'panel' ? 'active' : ''}" data-action="set" data-k="agendaTab" data-v="panel">${icon('workflows')}Tareas y workflows</button></div>`;
+    const tabs = `<div class="seg">${LIVE.mcp ? `<button class="${tab === 'lista' ? 'active' : ''}" data-action="set" data-k="agendaTab" data-v="lista">${icon('agenda')}Próximos eventos</button>` : ''}<button class="${tab === 'google' ? 'active' : ''}" data-action="set" data-k="agendaTab" data-v="google">${icon('gcal')}Google Calendar</button><button class="${tab === 'panel' ? 'active' : ''}" data-action="set" data-k="agendaTab" data-v="panel">${icon('workflows')}Tareas y workflows</button></div>`;
+    if (LIVE.mcp && tab === 'lista') {
+      return head('Agenda', 'Tus próximos eventos de Google Calendar, leídos en vivo. Las sesiones de consulta entran solas en Captación y en Contactos.', tabs) + `<div class="card">${liveAgendaHtml(21)}</div>`;
+    }
     if (tab === 'google') {
       const mode = S.settings.gcalMode || 'WEEK';
       return head('Agenda', 'Tu Google Calendar dentro del panel. Los eventos se crean y se editan en Google; las tareas del panel se pueden enviar a Google con un clic desde cada tarea.', `${tabs}`) +
@@ -863,7 +881,7 @@
         ${rep.todos && rep.todos.length ? `<div class="small" style="margin-top:10px;font-weight:700">Lo que tienes que hacer tú</div><ul class="todo">${rep.todos.map((t, i) => `<li class="${t.done ? 'done' : ''}"><button class="check ${t.done ? 'on' : ''}" data-action="todo" data-i="${i}">${t.done ? '✓' : ''}</button><span>${esc(t.text)}</span></li>`).join('')}</ul>` : ''}
         ${rep.status === 'falla' ? `<div class="row" style="margin-top:10px"><a class="btn sm" href="${MOODLE}/login/index.php" target="_blank" rel="noopener">${icon('ext')}Iniciar sesión en Moodle</a><button class="btn sm" data-action="copy" data-text="corre el agente de correcciones">Copiar la orden para Claude</button></div>` : ''}
       </div></div>` : '';
-    return head('Correcciones', 'Las tareas de redacción de tus alumnos según el último informe del agente diario de correcciones (11:18 hs de París). Pega cada informe nuevo para actualizar el panel y el workflow.',
+    return head('Correcciones', 'Las tareas de redacción de tus alumnos según el último informe del agente diario de correcciones (11:18 hs de París). ' + (LIVE.mcp ? 'Se actualiza solo con cada corrida del agente; también puedes pegar un informe a mano.' : 'Pega cada informe nuevo para actualizar el panel y el workflow.'),
       `<a class="btn" href="${MOODLE}/mod/assign/index.php?id=9" target="_blank" rel="noopener">${icon('ext')}Tareas en Moodle</a><a class="btn" href="#workflow/wf-corr">${icon('workflows')}Ver flujo</a><button class="btn primary" data-action="report">${icon('paste')}Pegar informe del agente</button>`, 'Curso 2027') +
       banner +
       `<div class="grid g-kpi" style="margin-bottom:16px">
@@ -880,6 +898,7 @@
           </tbody></table></div>
         </div>
         <div class="stack">
+          ${LIVE.mcp ? `<div class="card"><h2 style="margin-bottom:6px">Devoluciones agendadas</h2>${(() => { const dv = LIVE.events.filter((e) => evKind(e) === 'devolucion' && evStart(e) >= addDays(new Date(), -0.05)); return dv.length ? '<ul class="list">' + dv.slice(0, 8).map((e) => { const d = evStart(e); return `<li><div class="grow"><div class="t">${esc(e.summary)}</div><div class="m">${fmtDate(iso(d))} · ${hhmm(d)} hs</div></div>${e.conferenceUrl ? `<a class="btn sm" href="${esc(e.conferenceUrl)}" target="_blank" rel="noopener">Meet</a>` : ''}</li>`; }).join('') + '</ul>' : '<div class="empty">Sin devoluciones agendadas</div>'; })()}</div>` : ''}
           <div class="card"><h2 style="margin-bottom:10px">Pendientes del agente</h2>
             ${rep && ((rep.problems || []).length || (rep.pendingNotes || []).length) ? `<ul class="list">${(rep.problems || []).map((p) => `<li><span class="pill bad">Problema</span><span class="grow">${esc(p)}</span></li>`).join('')}${(rep.pendingNotes || []).map((p) => `<li><span class="pill">Nota</span><span class="grow">${esc(p)}</span></li>`).join('')}</ul>` : '<div class="empty">Sin pendientes</div>'}
           </div>
@@ -895,17 +914,21 @@
   VIEWS.agentes = () => {
     const ags = byBrand(S.agents).slice().sort((a, b) => (a.time || '').localeCompare(b.time || ''));
     const fails = ags.filter((a) => a.lastStatus === 'falla').length;
-    return head('Agentes IA', 'Las tareas programadas que trabajan para ti todos los días en Claude. Actualiza el resultado de cada corrida desde su ficha o, para correcciones, pegando el informe.', `<a class="btn" href="https://claude.ai/code" target="_blank" rel="noopener">${icon('ext')}Abrir Claude</a><button class="btn primary" data-action="new" data-entity="agents">${icon('plus')}Agente</button>`, 'Automatizaciones') +
+    return head('Agentes IA', (LIVE.mcp ? 'Tus tareas programadas de Claude, leídas en vivo: horario, resultado de la última corrida y conversaciones que esperan tu respuesta.' : 'Las tareas programadas que trabajan para ti todos los días en Claude.'), `<a class="btn" href="https://claude.ai/code" target="_blank" rel="noopener">${icon('ext')}Abrir Claude</a><button class="btn primary" data-action="new" data-entity="agents">${icon('plus')}Agente</button>`, 'Automatizaciones') +
       `<div class="grid g-kpi" style="margin-bottom:16px"><div class="card kpi accent"><div class="l">Agentes activos</div><div class="v">${ags.length}</div></div><div class="card kpi"><div class="l">Con falla</div><div class="v ${fails ? 'down' : 'up'}">${fails}</div></div><div class="card kpi"><div class="l">Workflows automatizados</div><div class="v">${new Set(ags.map((a) => a.wf).filter(Boolean)).size}</div></div></div>
       <div class="grid g-main"><div class="grid g-2">${ags.map((a) => { const w = wfById(a.wf); return `<div class="card agent">
         <div class="top"><span class="av">${icon('agentes')}</span><div style="flex:1;min-width:0"><h3>${esc(a.name)}</h3><div class="small muted">${brandDot(a.brand)} ${esc(brandName(a.brand))}</div></div><button class="iconbtn" data-action="edit" data-entity="agents" data-id="${a.id}" aria-label="Editar">${icon('edit')}</button></div>
-        <div class="row"><span class="pill info">${icon('clock')}Todos los días · ${esc(a.time)} hs ${esc(a.tz)}</span>${statusPill(a.lastStatus)}</div>
+        <div class="row"><span class="pill info">${icon('clock')}${esc(a.rule || 'Todos los días')}${a.time ? ' · ' + esc(a.time) + ' hs ' + esc(a.tz || '') : ''}</span>${a.enabled === false ? '<span class="pill">Pausado</span>' : a.lastStatus === 'curso' ? '<span class="pill ia">Corriendo</span>' : statusPill(a.lastStatus)}</div>
         <div class="small">${esc(a.desc)}</div>
         ${a.lastNote ? `<div class="small ${a.lastStatus === 'falla' ? 'down' : 'muted'}">${esc(a.lastNote)}</div>` : ''}
-        <div class="row between small muted"><span>Última corrida: ${fmtDate(a.lastRun) || 'sin dato'}</span>${w ? `<a href="#workflow/${w.id}">${esc(w.name)} →</a>` : ''}</div>
+        <div class="row between small muted"><span>Última corrida: ${fmtDate(a.lastRun) || 'sin dato'}${a.nextRun ? ' · próxima ' + fmtDate(iso(new Date(a.nextRun))) + ' ' + hhmm(new Date(a.nextRun)) + ' hs' : ''}</span>${w ? `<a href="#workflow/${w.id}">${esc(w.name)} →</a>` : ''}</div>
+        ${a.sessionId && LIVE.results[a.sessionId] ? `<details class="raw"><summary>Ver la respuesta de la última corrida</summary><pre>${esc(LIVE.results[a.sessionId])}</pre></details>` : ''}
+        ${a.sessionId ? `<a class="btn sm" href="${esc(a.link)}" target="_blank" rel="noopener" style="align-self:flex-start">${icon('ext')}Abrir la corrida en Claude</a>` : ''}
       </div>`; }).join('')}</div>
-      <div class="card" style="align-self:start"><h2 style="margin-bottom:12px">Línea del día</h2><div class="timeline">${ags.map((a) => `<div class="tl ${a.lastStatus}"><div class="h">${esc(a.time)} hs · ${esc(a.tz)}</div><div class="small">${esc(a.name)}</div></div>`).join('')}</div>
-        <div class="note" style="margin:8px 0 0">En noviembre París y Casablanca comparten hora (UTC+1); 12:00 UTC equivale a 13:00 hs en ambas.</div></div></div>`;
+      <div class="stack" style="align-self:start"><div class="card"><div class="ch"><h2>Tus conversaciones con Claude</h2>${LIVE.mcp ? '<button class="btn sm" data-action="live-refresh">Actualizar</button>' : ''}</div>${liveSessionsHtml(10)}</div>
+      ${LIVE.mcp && S.settings.mailEnabled ? `<div class="card"><h2 style="margin-bottom:6px">Correo pendiente</h2>${liveMailHtml(10)}</div>` : ''}
+      <div class="card"><h2 style="margin-bottom:12px">Línea del día</h2><div class="timeline">${ags.map((a) => `<div class="tl ${a.lastStatus}"><div class="h">${esc(a.time)} hs · ${esc(a.tz)}</div><div class="small">${esc(a.name)}</div></div>`).join('')}</div>
+        <div class="note" style="margin:8px 0 0">En noviembre París y Casablanca comparten hora (UTC+1); 12:00 UTC equivale a 13:00 hs en ambas.</div></div></div></div>`;
   };
 
   VIEWS.proyectos = () => {
@@ -1009,7 +1032,12 @@
   VIEWS.ajustes = () => {
     const demo = Object.keys(SCHEMAS).reduce((a, k) => a + S[k].filter((x) => x.demo).length, 0);
     const calText = (S.settings.calendars || []).map((c) => `${c.id} | ${c.name} | ${c.color}${c.on === false ? ' | oculto' : ''}`).join('\n');
-    return head('Ajustes y respaldo', 'Los datos se guardan en este navegador. Descarga una copia con regularidad para no perderlos y para usarlos en otro equipo.') +
+    return head('Ajustes y respaldo', LIVE.on ? 'Tus datos se guardan en la base del panel y se sincronizan entre tus dispositivos.' : 'Los datos se guardan en este navegador. Descarga una copia con regularidad para no perderlos y para usarlos en otro equipo.') +
+      `<div class="grid g-2" style="margin-bottom:16px"><div class="card"><h2 style="margin-bottom:6px">Conexiones automáticas</h2>${connectionsHtml()}</div>
+       <div class="card"><h2 style="margin-bottom:6px">Correo</h2><p class="muted" style="margin-top:0">El panel lee el Gmail conectado a tu cuenta de Claude. Actívalo solo si esa cuenta es la de Prep Diplomacia Uy.</p>
+       <form id="mailForm" class="fgrid"><div class="field full"><label><input type="checkbox" name="mailEnabled" ${S.settings.mailEnabled ? 'checked' : ''}> Mostrar el correo pendiente en el panel</label></div>
+       <div class="field full"><label>Filtro de búsqueda de Gmail</label><input name="mailQuery" value="${esc(S.settings.mailQuery || 'in:inbox is:unread -category:promotions -category:social newer_than:7d')}"></div>
+       <div class="field full"><button class="btn primary" type="submit" style="justify-self:start">Guardar</button></div></form></div></div>` +
       `${demo ? `<div class="note">Hay <strong>${demo}</strong> registros de ejemplo (marcados “ejemplo”). Cuando cargues tus datos reales, elimínalos con el botón de abajo.</div>` : ''}
       <div class="grid g-2">
         <div class="card"><h2 style="margin-bottom:12px">Preferencias</h2><form id="settingsForm" class="fgrid">
@@ -1026,6 +1054,261 @@
         </div>
       </div>`;
   };
+
+  /* ================= Modo conectado (página publicada en Claude) =================
+     db: datos sincronizados entre dispositivos (solo la dueña lee y escribe).
+     mcp: lectura en vivo de Google Calendar, agentes y sesiones de Claude y, si se activa, Gmail. */
+  const DB_KEYS = ['settings', 'projects', 'tasks', 'posts', 'transactions', 'metrics', 'contacts', 'resources', 'workflows', 'items', 'agents', 'reports', 'activity', 'meta'];
+  const LIVE = { on: false, db: null, mcp: null, written: {}, queue: new Set(), writing: false, at: null, busy: false,
+    src: { cal: { state: 'idle' }, ccr: { state: 'idle' }, ses: { state: 'idle' }, mail: { state: 'off' } },
+    events: [], sessions: [], results: {}, mail: [] };
+  const CCR = 'Claude Code Remote', GCAL = 'Google Calendar', GMAIL = 'Gmail';
+
+  function dbSave() {
+    DB_KEYS.forEach((k) => { const j = JSON.stringify(S[k] ?? null); if (j !== LIVE.written[k]) LIVE.queue.add(k); });
+    if (LIVE.queue.size) { setLiveFoot('saving'); flushDb(); }
+  }
+  async function flushDb() {
+    if (LIVE.writing) return; LIVE.writing = true;
+    try {
+      while (LIVE.queue.size) {
+        const k = LIVE.queue.values().next().value; LIVE.queue.delete(k);
+        const j = JSON.stringify(S[k] ?? null); if (j === LIVE.written[k]) continue;
+        try { await LIVE.db.doc('panel/' + k).set({ v: S[k] ?? null, at: new Date().toISOString() }); LIVE.written[k] = j; }
+        catch (e) {
+          if (e && e.code === 'quota_exceeded') toast('La base del panel está llena: borra informes o actividad antigua.');
+          else if (e && e.code === 'unavailable') { LIVE.queue.add(k); await new Promise((r) => setTimeout(r, 1500 + Math.random() * 1500)); }
+          else toast('No se pudo guardar: ' + (e && e.code || 'error'));
+        }
+      }
+      setLiveFoot('ok');
+    } finally { LIVE.writing = false; }
+  }
+  function setLiveFoot() { const el = $('#sideFoot'); if (el && S) el.innerHTML = footHtml(); }
+
+  const unwrap = (p) => {
+    if (p && typeof p === 'object') return p;
+    if (typeof p === 'string') { const i = p.indexOf('{'), j = p.lastIndexOf('}'); if (i >= 0 && j > i) { try { return JSON.parse(p.slice(i, j + 1)); } catch (e) { /* texto */ } } }
+    return null;
+  };
+  const ccrData = (o) => (o && (o.ccr && o.ccr.data || o.data)) || [];
+  const sessionUrl = (id) => id ? 'https://claude.ai/code/' + String(id).replace(/^cse_/, 'session_') : 'https://claude.ai/code';
+  const decodeEnt = (s) => String(s || '').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/[͏‌​\s]+/g, ' ').trim();
+  function findResultText(ev) {
+    if (!ev || typeof ev !== 'object') return '';
+    const r = ev.result || ev;
+    if (r.internal_anthropic_catchall && typeof r.internal_anthropic_catchall.result === 'string') return r.internal_anthropic_catchall.result;
+    if (typeof r.result === 'string') return r.result;
+    let best = '';
+    (function walk(o, d) { if (!o || typeof o !== 'object' || d > 5) return; for (const [k, v] of Object.entries(o)) { if (k === 'result' && typeof v === 'string' && v.length > best.length) best = v; else if (v && typeof v === 'object') walk(v, d + 1); } })(r, 0);
+    return best;
+  }
+  function mcpMessage(e, server) {
+    const c = e && e.code;
+    if (c === 'needs_reauth') return `Vuelve a conectar ${server} en claude.ai › Configuración › Conectores.`;
+    if (c === 'server_not_connected' || c === 'selection_required' || c === 'server_not_found') return `Agrega o elige ${server} en claude.ai › Configuración › Conectores.`;
+    if (c === 'not_in_manifest' || c === 'approval_required' || c === 'consent_required') return `Falta tu permiso para usar ${server} en este panel.`;
+    if (c === 'blocked_by_policy') return `Tu organización bloquea ${server} para este panel.`;
+    if (c === 'not_granted' || c === 'capability_disabled' || c === 'capability_removed') return 'Las conexiones no están disponibles en esta vista.';
+    if (c === 'tool_error') return `${server} respondió con un error.`;
+    return `${server} no respondió (${c || 'error'}). Se reintenta en la próxima actualización.`;
+  }
+  async function call(server, tool, input) {
+    try { return unwrap((await LIVE.mcp.callTool(server, tool, input)).payload); }
+    catch (e) {
+      if (e && e.retryable) { await new Promise((r) => setTimeout(r, Math.min(e.retryAfterMs || 1500, 8000) + Math.random() * 800)); return unwrap((await LIVE.mcp.callTool(server, tool, input)).payload); }
+      throw e;
+    }
+  }
+  const needsClick = (e) => e && ['not_in_manifest', 'approval_required', 'consent_required'].includes(e.code);
+
+  /* --- Agentes y sesiones de Claude --- */
+  const tzLabel = (tz) => ({ 'Europe/Paris': 'París', 'Africa/Casablanca': 'Casablanca', 'America/Montevideo': 'Montevideo' }[tz] || (tz ? tz.split('/').pop().replace(/_/g, ' ') : 'UTC'));
+  function parseCron(c) {
+    const m = /^(?:CRON_TZ=(\S+)\s+)?(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$/.exec(String(c || '').trim());
+    if (!m) return { time: '', tz: '', rule: '' };
+    const [, tz, mi, h, dom, , dow] = m;
+    const time = /^\d+$/.test(mi) && /^\d+$/.test(h) ? `${pad(h)}:${pad(mi)}` : '';
+    const rule = dow === '1-5' ? 'De lunes a viernes' : dow !== '*' ? 'Algunos días' : dom !== '*' ? 'Algunos días del mes' : /^\*\/|,/.test(h) ? 'Varias veces al día' : 'Todos los días';
+    return { time, tz: tzLabel(tz), rule };
+  }
+  const wfFor = (name) => /correcci/i.test(name) ? 'wf-corr' : /carrusel|noticia|reel/i.test(name) ? 'wf-carrusel' : /art[ií]culo|blog|panorama/i.test(name) ? 'wf-blog' : '';
+  const statusFrom = (run, text) => {
+    if (!run) return 'ok';
+    if (/RUNNING|PENDING/.test(run.status || '')) return 'curso';
+    if (/FAIL|ABANDON|ERROR/.test(run.status || '')) return 'falla';
+    if (/\bFALLA\b|SIN SEÑAL|Se connecter|no pudo (leer|correr)|no corri[oó]/i.test(text || '')) return 'falla';
+    if (/CORREO NO ENVIADO|PENDIENTE DE PEGAR|con avisos/i.test(text || '')) return 'aviso';
+    return 'ok';
+  };
+  async function syncClaude() {
+    const triggers = []; let cursor; let pages = 0;
+    do { const o = await call(CCR, 'list_triggers', cursor ? { limit: 100, cursor } : { limit: 100 }); triggers.push(...(o && o.data || [])); cursor = o && o.has_more ? o.next_cursor : null; } while (cursor && ++pages < 6);
+    const runs = await Promise.all(triggers.map(async (t) => {
+      const sid = t.last_run && t.last_run.session_id; if (!sid) return [t, ''];
+      if (LIVE.results[sid] != null) return [t, LIVE.results[sid]];
+      try { const o = await call(CCR, 'list_events', { session_id: sid, kinds: ['result'], limit: 100 }); const evs = ccrData(o).filter((e) => e.result); const last = evs.sort((a, b) => String(a.created_at).localeCompare(String(b.created_at))).pop(); LIVE.results[sid] = findResultText(last); }
+      catch (e) { LIVE.results[sid] = ''; }
+      return [t, LIVE.results[sid]];
+    }));
+    // los agentes cargados a mano sin vínculo se reemplazan por los reales
+    if (triggers.length) S.agents = S.agents.filter((a) => a.triggerId || a.manual);
+    let changed = false;
+    runs.forEach(([t, text]) => {
+      const cron = parseCron(t.cron_expression || ''); const run = t.last_run || null;
+      let a = S.agents.find((x) => x.triggerId === t.id);
+      if (!a) { a = { id: 'ag-' + uid(), triggerId: t.id, wf: wfFor(t.name), brand: /carolina techera/i.test(t.name) ? 'ct' : 'pd', desc: '' }; S.agents.push(a); }
+      const status = statusFrom(run, text);
+      const firstLine = String(text || '').split('\n').map((l) => l.replace(/[*#>]/g, '').trim()).filter(Boolean)[0] || '';
+      Object.assign(a, { name: t.name, time: cron.time, tz: cron.tz, rule: cron.rule, enabled: t.enabled !== false, nextRun: t.next_run_at || '', lastRun: run && run.fired_at ? iso(new Date(run.fired_at)) : a.lastRun || '', lastRunAt: run && run.fired_at || '', lastStatus: status, lastNote: firstLine.slice(0, 220), sessionId: run && run.session_id || '', link: sessionUrl(run && run.session_id) });
+      if (!a.desc) a.desc = String((t.derived_state && t.derived_state.prompt) || '').split(/(?<=\.)\s/)[0].slice(0, 200);
+      if (!run || !run.session_id || !text) return;
+      // Correcciones: el informe de la última corrida actualiza la sección y su workflow
+      if (a.wf === 'wf-corr' && /correcciones diarias/i.test(t.name) && !S.reports.some((r) => r.sourceSession === run.session_id)) {
+        const r = parseReport(text); r.sourceSession = run.session_id; r.raw = ''; if (!/\d{4}-\d{2}-\d{2}/.test(text)) r.date = a.lastRun;
+        ingestReport(r); logActivity(t.name, `Informe de correcciones: ${num(reportTotals(r).revision)} en tu revisión${r.status === 'falla' ? ' · con falla' : ''}`, r.status === 'falla' ? 'bad' : 'ok'); changed = true;
+      }
+      // Carruseles y blog: la propuesta del día entra como ítem del workflow
+      if ((a.wf === 'wf-carrusel' || a.wf === 'wf-blog') && !S.items.some((i) => i.key === 'run:' + run.session_id)) {
+        const w = wfById(a.wf); if (!w) return;
+        S.items.push({ id: uid(), key: 'run:' + run.session_id, wf: w.id, stage: w.stages[0].id, title: `${t.name.replace(/\s*[-·]\s*Prep Diplomacia Uy$/i, '')} · ${fmtDate(a.lastRun)}`, brand: a.brand, owner: 'Agente IA', due: a.lastRun, link: sessionUrl(run.session_id), notes: String(text).slice(0, 1500), auto: false, fromAgent: true });
+        logActivity(t.name, `Nueva propuesta en ${w.name}`, 'ia'); changed = true;
+      }
+      // Agente que falla por primera vez en esta corrida
+      if (status === 'falla' && a.notifiedRun !== run.session_id) { a.notifiedRun = run.session_id; logActivity(t.name, firstLine || 'Corrida con falla', 'bad'); changed = true; }
+    });
+    return changed;
+  }
+  async function syncSessions() {
+    const o = await call(CCR, 'list_sessions', { limit: 30 });
+    LIVE.sessions = ccrData(o).filter((s) => s && s.id).map((s) => ({ id: s.id, title: s.title || 'Sesión sin título', bucket: String(s.status_bucket || s.session_status || ''), updated: s.updated_at || s.created_at || '', needs: s.post_turn_summary && s.post_turn_summary.needs_action || '', recent: s.post_turn_summary && s.post_turn_summary.recent_action || '' }));
+  }
+
+  /* --- Google Calendar --- */
+  const evStart = (e) => e.start && e.start.dateTime ? new Date(e.start.dateTime) : e.start && e.start.date ? parse(e.start.date) : null;
+  const evKind = (e) => { const t = String(e.summary || ''); return /devoluci/i.test(t) ? 'devolucion' : /consulta/i.test(t) ? 'consulta' : /clase|zoom/i.test(t) ? 'clase' : 'otro'; };
+  const hhmm = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  async function syncCalendar() {
+    const from = iso(addDays(new Date(), -1)) + 'T00:00:00', to = iso(addDays(new Date(), 21)) + 'T23:59:59';
+    const cals = (S.settings.calendars || []).filter((c) => c.on !== false && c.id);
+    const all = [];
+    for (const c of cals) {
+      let token; let pages = 0;
+      do { const o = await call(GCAL, 'list_events', Object.assign({ calendarId: c.id, startTime: from, endTime: to, pageSize: 100 }, token ? { pageToken: token } : {})); (o && o.events || []).forEach((e) => all.push(Object.assign({}, e, { _cal: c }))); token = o && o.nextPageToken; } while (token && ++pages < 4);
+    }
+    LIVE.events = all.filter((e) => e.status !== 'cancelled' && evStart(e)).sort((a, b) => evStart(a) - evStart(b));
+    // Sesiones de consulta: entran solas en Captación y en Contactos
+    let changed = false;
+    LIVE.events.filter((e) => evKind(e) === 'consulta').forEach((e) => {
+      const d = evStart(e); const day = iso(d); const key = 'gcal:' + e.id;
+      const guest = (e.attendees || []).find((a) => !a.self && !a.organizer) || {};
+      const nameM = /\(([^)]+)\)\s*$/.exec(e.summary || ''); const who = nameM ? nameM[1] : (guest.displayName || guest.email || 'Consulta');
+      if (!S.items.some((i) => i.key === key)) {
+        S.items.push({ id: uid(), key, wf: 'wf-captacion', stage: 'reunion', title: `Sesión de consultas · ${who}`, brand: 'pd', owner: 'Carolina', due: day, link: e.htmlLink || '', notes: `Agendada en Google Calendar para el ${fmtDate(day)} a las ${hhmm(d)} hs.` });
+        logActivity('Google Calendar', `Nueva sesión de consultas: ${who} (${fmtDate(day)})`, 'info'); changed = true;
+      }
+      const ck = 'gcal:' + (guest.email || who).toLowerCase();
+      if (!S.contacts.some((c) => c.key === ck)) { S.contacts.push({ id: uid(), key: ck, name: who, type: 'Interesado/a', brand: 'pd', email: guest.email || '', followup: iso(addDays(d, 1)), notes: `Sesión de consultas del ${fmtDate(day)}.` }); changed = true; }
+    });
+    return changed;
+  }
+
+  /* --- Gmail (apagado hasta que se confirme la cuenta) --- */
+  async function syncMail() {
+    const q = S.settings.mailQuery || 'in:inbox is:unread -category:promotions -category:social newer_than:7d';
+    const o = await call(GMAIL, 'search_threads', { query: q, pageSize: 25, view: 'THREAD_VIEW_SUMMARY' });
+    LIVE.mail = (o && o.threads || []).map((t) => { const m = (t.messages || [])[0] || {}; const from = (m.addressDisplayNames || []).find((x) => x.emailAddress === m.sender) || {}; return { id: t.id, subject: decodeEnt(m.subject) || '(sin asunto)', from: from.displayName || m.sender || '', date: m.date || '', snippet: decodeEnt(m.snippet).slice(0, 160), url: t.viewUrl || m.viewUrl || '' }; });
+  }
+
+  async function refreshLive(fromClick) {
+    if (!LIVE.mcp || LIVE.busy) return; LIVE.busy = true; setLiveFoot();
+    const run = async (key, fn, server) => {
+      if (LIVE.src[key].state === 'blocked' && !fromClick) return false;
+      try { const ch = await fn(); LIVE.src[key] = { state: 'ok', at: new Date() }; return ch; }
+      catch (e) { LIVE.src[key] = { state: needsClick(e) ? 'blocked' : 'error', code: e && e.code, msg: mcpMessage(e, server), at: LIVE.src[key].at }; return false; }
+    };
+    const c1 = await run('ccr', syncClaude, CCR);
+    await run('ses', syncSessions, CCR);
+    const c2 = await run('cal', syncCalendar, GCAL);
+    if (S.settings.mailEnabled) await run('mail', syncMail, GMAIL); else LIVE.src.mail = { state: 'off' };
+    LIVE.at = new Date(); LIVE.busy = false;
+    if (c1 || c2) save();
+    if ($('#drawer').hidden && $('#palette').hidden) render(); else setLiveFoot();
+  }
+
+  async function bootLive() {
+    if (!window.claude || typeof window.claude.use !== 'function') return false;
+    $('#main').innerHTML = '<div class="empty" style="padding:80px 10px">Conectando con tus datos…</div>';
+    const db = await window.claude.use('db').catch(() => null);
+    if (!db) return false;
+    LIVE.on = true; LIVE.db = db;
+    LIVE.mcp = await window.claude.use('mcp').catch(() => null);
+    await new Promise((resolve) => {
+      let first = true;
+      const timer = setTimeout(() => { if (first) { first = false; toast('Los datos tardan en llegar; se muestra lo último guardado en este dispositivo.'); S = S || normalize(loadLocal() || seedClean()); route(); resolve(); } }, 10000);
+      db.collection('panel').onSnapshot((snap) => {
+        if (snap.metadata.fromCache && first && snap.empty) return; // esperar la respuesta del servidor
+        const docs = {}; snap.docs.forEach((d) => { if (d.exists) docs[d.id] = d.data(); });
+        if (first) {
+          first = false; clearTimeout(timer);
+          if (Object.keys(docs).length) { const o = {}; DB_KEYS.forEach((k) => { if (docs[k]) { o[k] = docs[k].v; LIVE.written[k] = JSON.stringify(docs[k].v ?? null); } }); S = normalize(o); }
+          else { S = normalize(loadLocal() || seedClean()); logActivity('Panel', 'Panel conectado: tus datos quedan sincronizados entre dispositivos.', 'ok'); }
+          save(); route(); resolve();
+          return;
+        }
+        // cambios hechos en otro dispositivo
+        let ch = false;
+        DB_KEYS.forEach((k) => { if (!docs[k]) return; const j = JSON.stringify(docs[k].v ?? null); if (j !== LIVE.written[k] && !LIVE.queue.has(k)) { LIVE.written[k] = j; S[k] = docs[k].v; ch = true; } });
+        if (ch) { S = normalize(S); if ($('#drawer').hidden && $('#palette').hidden) render(); }
+      }, (e) => { if (first) { first = false; clearTimeout(timer); S = normalize(loadLocal() || seedClean()); route(); resolve(); } toast('Se perdió la conexión con la base del panel (' + (e && e.code) + '). Recarga la página.'); });
+    });
+    if (LIVE.mcp) { refreshLive(); setInterval(() => { if (!document.hidden) refreshLive(); }, 5 * 60e3); document.addEventListener('visibilitychange', () => { if (!document.hidden && LIVE.at && Date.now() - LIVE.at > 60e3) refreshLive(); }); }
+    return true;
+  }
+  function loadLocal() { try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
+  function seedClean() { const s = seed(); Object.keys(SCHEMAS).forEach((k) => { s[k] = (s[k] || []).filter((x) => !x.demo); }); return s; }
+
+  /* --- Piezas de interfaz del modo conectado --- */
+  function liveAgendaHtml(days) {
+    const st = LIVE.src.cal;
+    if (!LIVE.mcp) return '';
+    if (st.state === 'blocked') return `<div class="empty">${esc(st.msg)}<br><button class="btn sm primary" data-action="live-refresh" style="margin-top:8px">Permitir y cargar</button></div>`;
+    if (st.state === 'error' && !LIVE.events.length) return `<div class="empty">${esc(st.msg)}</div>`;
+    if (st.state === 'idle') return '<div class="empty">Cargando tu agenda…</div>';
+    const now = new Date(); const lim = addDays(new Date(now.getFullYear(), now.getMonth(), now.getDate()), days);
+    const list = LIVE.events.filter((e) => { const s = evStart(e); const en = e.end && e.end.dateTime ? new Date(e.end.dateTime) : addDays(s, 1); return en >= now && s < lim; });
+    if (!list.length) return `<div class="empty">Sin eventos ${days <= 1 ? 'hoy' : 'en estos días'}.</div>`;
+    let last = '';
+    return '<ul class="list">' + list.map((e) => {
+      const s = evStart(e); const day = iso(s); const k = evKind(e);
+      const hdr = day !== last ? (last = day, `<li style="border:0;padding:10px 0 2px"><span class="small muted" style="font-weight:700;text-transform:uppercase;letter-spacing:.05em">${day === today() ? 'Hoy' : day === iso(addDays(now, 1)) ? 'Mañana' : DOW_L[s.getDay()] + ' ' + fmtDate(day)}</span></li>`) : '';
+      const pill = k === 'devolucion' ? '<span class="pill gold">Devolución</span>' : k === 'consulta' ? '<span class="pill ok">Consulta</span>' : k === 'clase' ? '<span class="pill info">Clase</span>' : '';
+      return hdr + `<li><span class="dot" style="background:${esc(e._cal && e._cal.color || '#153D63')}"></span><div class="grow"><div class="t">${esc(e.summary || '(sin título)')}</div><div class="m">${e.start && e.start.dateTime ? hhmm(s) + ' hs' : 'Todo el día'}${pill ? ' ' + pill : ''}</div></div>${e.conferenceUrl ? `<a class="btn sm" href="${esc(e.conferenceUrl)}" target="_blank" rel="noopener">Meet</a>` : ''}${e.htmlLink ? `<a class="iconbtn" href="${esc(e.htmlLink)}" target="_blank" rel="noopener" aria-label="Abrir en Google Calendar">${icon('ext')}</a>` : ''}</li>`;
+    }).join('') + '</ul>';
+  }
+  function liveSessionsHtml(max) {
+    const st = LIVE.src.ses;
+    if (!LIVE.mcp) return '<div class="empty">Disponible en la versión publicada en Claude.</div>';
+    if (st.state === 'blocked') return `<div class="empty">${esc(st.msg)}<br><button class="btn sm primary" data-action="live-refresh" style="margin-top:8px">Permitir y cargar</button></div>`;
+    if (st.state !== 'ok' && !LIVE.sessions.length) return `<div class="empty">${esc(st.msg || 'Cargando…')}</div>`;
+    const list = LIVE.sessions.slice().sort((a, b) => (b.needs ? 1 : 0) - (a.needs ? 1 : 0) || String(b.updated).localeCompare(String(a.updated))).slice(0, max);
+    return '<ul class="list">' + list.map((s) => { const d = s.updated ? new Date(s.updated) : null; const waiting = !!s.needs || /BLOCKED/.test(s.bucket); const working = /WORKING|RUNNING/.test(s.bucket);
+      return `<li><span class="dot" style="background:${waiting ? 'var(--warn)' : working ? 'var(--ia)' : 'var(--ok)'}"></span><div class="grow"><div class="t">${esc(s.title)}</div><div class="m">${waiting ? '<span class="pill warn">Espera tu respuesta</span>' : working ? '<span class="pill ia">Trabajando</span>' : ''}${d ? `<span>${fmtDate(iso(d))} ${hhmm(d)} hs</span>` : ''}</div>${s.needs || s.recent ? `<div class="small muted" style="margin-top:2px">${esc(String(s.needs || s.recent).slice(0, 180))}</div>` : ''}</div><a class="btn sm" href="${esc(sessionUrl(s.id))}" target="_blank" rel="noopener">Abrir</a></li>`; }).join('') + '</ul>';
+  }
+  function liveMailHtml(max) {
+    if (!S.settings.mailEnabled) return `<div class="empty">El correo está desactivado. Actívalo en <a href="#ajustes">Ajustes</a> cuando conectes la cuenta de Prep Diplomacia Uy.</div>`;
+    const st = LIVE.src.mail;
+    if (st.state === 'blocked') return `<div class="empty">${esc(st.msg)}<br><button class="btn sm primary" data-action="live-refresh" style="margin-top:8px">Permitir y cargar</button></div>`;
+    if (st.state !== 'ok' && !LIVE.mail.length) return `<div class="empty">${esc(st.msg || 'Cargando…')}</div>`;
+    if (!LIVE.mail.length) return '<div class="empty">Sin correos pendientes con el filtro actual.</div>';
+    return '<ul class="list">' + LIVE.mail.slice(0, max).map((m, i) => `<li><div class="grow"><div class="t">${esc(m.subject)}</div><div class="m"><span>${esc(m.from)}</span>${m.date ? `<span>· ${fmtDate(iso(new Date(m.date)))}</span>` : ''}</div><div class="small muted">${esc(m.snippet)}</div></div><button class="btn sm" data-action="mail-task" data-i="${i}">Crear tarea</button>${m.url ? `<a class="iconbtn" href="${esc(m.url)}" target="_blank" rel="noopener" aria-label="Abrir en Gmail">${icon('ext')}</a>` : ''}</li>`).join('') + '</ul>';
+  }
+  function connectionsHtml() {
+    if (!LIVE.mcp) return `<div class="empty">${LIVE.on ? 'Las conexiones no están disponibles en esta vista.' : 'Las conexiones funcionan en la versión publicada en Claude.'}</div>`;
+    const row = (label, key) => { const s = LIVE.src[key]; const pill = s.state === 'ok' ? '<span class="pill ok">Conectado</span>' : s.state === 'off' ? '<span class="pill">Desactivado</span>' : s.state === 'idle' ? '<span class="pill">Cargando</span>' : s.state === 'blocked' ? '<span class="pill warn">Falta permiso</span>' : '<span class="pill bad">Error</span>';
+      return `<li><div class="grow"><div class="t">${label}</div><div class="m">${s.msg ? esc(s.msg) : s.at ? 'Actualizado ' + hhmm(s.at) + ' hs' : ''}</div></div>${pill}</li>`; };
+    return `<ul class="list">${row('Agentes programados de Claude', 'ccr')}${row('Sesiones de Claude', 'ses')}${row('Google Calendar', 'cal')}${row('Gmail', 'mail')}</ul><div class="row" style="margin-top:10px"><button class="btn sm primary" data-action="live-refresh">Actualizar ahora</button>${LIVE.at ? `<span class="small muted">Última actualización ${hhmm(LIVE.at)} hs</span>` : ''}</div>`;
+  }
 
   /* ================= Render y navegación ================= */
   function render() {
@@ -1097,7 +1380,7 @@
       Object.assign(o, data); delete o.demo;
       if (entity === 'tasks' && was !== 'hecha' && o.status === 'hecha') spawnNext(o);
     } else {
-      const o = Object.assign({ id: (entity === 'workflows' ? 'wf-' : '') + uid() }, data); S[entity].push(o);
+      const o = Object.assign({ id: (entity === 'workflows' ? 'wf-' : '') + uid() }, data, entity === 'agents' ? { manual: true } : {}); S[entity].push(o);
       if (entity === 'tasks' && o.status === 'hecha') spawnNext(o);
     }
     save(); closeDrawer(); render(); toast('Guardado');
@@ -1133,10 +1416,11 @@
     const prev = latestReport();
     if (!Object.keys(r.classes).length && prev) { r.classes = JSON.parse(JSON.stringify(prev.classes)); r.pendingNotes = ['Cantidades sin cambios: se mantienen las del informe anterior']; }
     S.reports = S.reports.filter((x) => !(x.date === r.date && x.time === r.time));
+    if (r.sourceSession) S.reports = S.reports.filter((x) => !(x.date === r.date && !x.sourceSession));
     S.reports.push(r);
     if (S.reports.length > 60) S.reports = S.reports.slice(-60);
     syncCorrections(r);
-    const ag = S.agents.find((a) => a.id === 'ag-corr' || a.wf === 'wf-corr');
+    const ag = S.agents.find((a) => a.id === 'ag-corr') || S.agents.find((a) => /correcciones diarias/i.test(a.name || '')) || S.agents.find((a) => a.wf === 'wf-corr');
     if (ag) { ag.lastRun = r.date; ag.lastStatus = r.status; ag.lastNote = String(r.summary || '').slice(0, 220); }
   }
 
@@ -1152,6 +1436,7 @@
       nw('projects', 'Nuevo proyecto'), nw('contacts', 'Nuevo contacto'), nw('metrics', 'Registrar métrica'), nw('resources', 'Nuevo recurso'), nw('workflows', 'Nuevo workflow'), nw('agents', 'Nuevo agente'),
       { g: 'Crear', l: 'Pegar informe del agente de correcciones', ic: 'paste', run: openReportDrawer },
       { g: 'Acciones', l: 'Cambiar tema claro u oscuro', ic: 'moon', run: toggleTheme },
+      { g: 'Acciones', l: 'Actualizar conexiones (agenda, agentes, sesiones)', ic: 'agentes', run: () => refreshLive(true) },
       { g: 'Acciones', l: 'Descargar copia de seguridad', ic: 'inbox', run: exportJson },
       { g: 'Acciones', l: 'Crear evento en Google Calendar', ic: 'gcal', run: () => window.open(gcalTemplate({ title: '', date: today() }), '_blank', 'noopener') },
     ];
@@ -1253,6 +1538,8 @@
       case 'todo': { const r = latestReport(); const t = r && r.todos[Number(el.dataset.i)]; if (t) { t.done = !t.done; save(); render(); } break; }
       case 'copy': { const txt = el.dataset.text; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copiado: ' + txt), () => toast(txt)); break; }
       case 'report': openReportDrawer(); break;
+      case 'live-refresh': e.preventDefault(); if (LIVE.mcp) { refreshLive(true); toast('Actualizando conexiones…'); } break;
+      case 'mail-task': { const m = LIVE.mail[Number(el.dataset.i)]; if (m) openForm('tasks', null, { title: 'Responder: ' + m.subject, notes: `${m.from}\n${m.url}`, due: today(), priority: 'media' }); break; }
       case 'report-parse': previewReport(); break;
       case 'report-save': saveReport(); break;
       case 'gcal-mode': S.settings.gcalMode = el.dataset.v; save(); render(); break;
@@ -1272,6 +1559,7 @@
   document.addEventListener('submit', (e) => {
     e.preventDefault();
     if (e.target.id === 'entityForm') submitForm(e.target);
+    if (e.target.id === 'mailForm') { const f = e.target; S.settings.mailEnabled = f.mailEnabled.checked; S.settings.mailQuery = f.mailQuery.value.trim(); save(); if (S.settings.mailEnabled) refreshLive(true); else { LIVE.mail = []; LIVE.src.mail = { state: 'off' }; render(); } toast('Preferencias de correo guardadas'); }
     if (e.target.id === 'settingsForm') {
       const f = e.target;
       S.settings.owner = f.owner.value.trim(); S.settings.tz = f.tz.value.trim() || 'Africa/Casablanca';
@@ -1312,7 +1600,7 @@
 
   window.addEventListener('hashchange', route);
   async function boot() {
-    if (!REMOTE) { save(); route(); return; }
+    if (!REMOTE) { if (await bootLive()) return; S = S || load(); save(); route(); return; }
     $('#main').innerHTML = '<div class="empty" style="padding:80px 10px">Conectando con tu web…</div>';
     try {
       const res = await api('/state');
