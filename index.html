@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Central · Prep Diplomacia Uy</title>
+<meta name="description" content="Panel de gestión centralizado de Prep Diplomacia Uy y Carolina Techera RRII.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700&family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="logo">
+      <div class="iso">PD</div>
+      <div><strong>Panel Central</strong><span>Prep Diplomacia Uy · Carolina Techera RRII</span></div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="side-foot">Datos guardados en este navegador.<br><a href="#ajustes">Copia de seguridad</a></div>
+  </aside>
+  <div class="main-wrap">
+    <header class="topbar">
+      <button class="icon-btn menu-btn" data-action="menu" aria-label="Menú">☰</button>
+      <div class="brand-filter" id="brandFilter"></div>
+      <input type="search" id="search" placeholder="Buscar en todo el panel…" aria-label="Buscar">
+      <div class="quick">
+        <button class="btn primary" data-action="quick">+ Nuevo</button>
+        <div class="quick-menu" id="quickMenu" hidden>
+          <button data-action="new" data-entity="tasks">Tarea</button>
+          <button data-action="new" data-entity="posts">Publicación</button>
+          <button data-action="new" data-entity="transactions">Movimiento contable</button>
+          <button data-action="new" data-entity="projects">Proyecto</button>
+          <button data-action="new" data-entity="metrics">Registro de métrica</button>
+          <button data-action="new" data-entity="contacts">Contacto</button>
+          <button data-action="new" data-entity="resources">Recurso o enlace</button>
+        </div>
+      </div>
+    </header>
+    <main id="main"></main>
+  </div>
+</div>
+<div class="modal-bg" id="modal" hidden><div class="modal" role="dialog" aria-modal="true" id="modalBox"></div></div>
+<div class="toast" id="toast" hidden></div>
+<input type="file" id="importFile" accept="application/json" hidden>
+<script src="assets/app.js"></script>
+</body>
+</html>
