@@ -127,11 +127,10 @@ app/                 Páginas (catálogo, aula, cuenta, administración) y rutas
 components/          Piezas de interfaz reutilizables
 lib/                 Datos, sesión, Stripe, formato y datos de demostración
 supabase/schema.sql  Base de datos, reglas de seguridad y almacenamiento
-public/isotipo.svg   Isotipo provisorio (reemplazar por el oficial)
+public/              Logos (versión azul y blanca, completa e isotipo)
 ```
 
 ## Pendientes sugeridos
 
-- Reemplazar `public/isotipo.svg` y `app/icon.svg` por el isotipo oficial.
 - Cargar el precio real de cada curso antes de publicarlo.
 - Personalizar los correos de Supabase (Authentication > Email Templates) con la marca y enviarlos desde cursos@prepdiplomacia.com mediante un SMTP propio (Authentication > SMTP Settings); el envío por defecto de Supabase tiene un límite bajo de correos por hora.

@@ -12,6 +12,7 @@ export default async function Ingresar({ searchParams }: { searchParams: Promise
   return (
     <div className="contenedor">
       <div className="caja caja-auth">
+        <img src="/logo-azul.png" alt="Prep Diplomacia Uy" className="auth-logo" />
         {isDemo ? (
           <p>El acceso de alumnos se activa al conectar Supabase. Consulta el archivo README para configurarlo.</p>
         ) : (

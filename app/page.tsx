@@ -7,7 +7,8 @@ export default async function Home() {
   return (
     <>
       <section className="hero">
-        <div className="contenedor">
+        <div className="contenedor hero-grid">
+          <div>
           <h1>Formación en relaciones internacionales y diplomacia</h1>
           <p>
             Cursos en línea para preparar el concurso de ingreso al Servicio Exterior uruguayo y profundizar en
@@ -17,6 +18,8 @@ export default async function Home() {
             <Link href="/cursos" className="btn btn-dorado">Ver cursos</Link>
             <Link href="/ingresar" className="btn btn-linea">Acceder a mi aula</Link>
           </div>
+          </div>
+          <img src="/logo-blanco.png" alt="Prep Diplomacia Uy" className="hero-logo" />
         </div>
       </section>
 

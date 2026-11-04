@@ -32,7 +32,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <header className="header">
           <div className="contenedor">
             <Link href="/" className="marca">
-              <img src="/isotipo.svg" alt="" />
+              <img src="/isotipo-blanco.png" alt="" />
               {brand.name}
             </Link>
             <nav className="nav">
@@ -54,8 +54,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {children}
         <footer className="footer">
           <div className="contenedor">
-            <div>
-              <strong>{brand.name}</strong>
+            <div className="footer-marca">
+              <img src="/logo-blanco.png" alt={brand.name} />
               <div>Formación en relaciones internacionales y diplomacia</div>
             </div>
             <div>

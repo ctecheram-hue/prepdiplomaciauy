@@ -42,7 +42,7 @@ img { max-width: 100%; }
 .header { background: var(--azul); color: #fff; border-bottom: 3px solid var(--dorado); }
 .header .contenedor { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 64px; flex-wrap: wrap; }
 .marca { display: flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; font-family: var(--f-titulo); font-weight: 700; letter-spacing: .02em; }
-.marca img { width: 34px; height: 34px; border-radius: 6px; }
+.marca img { height: 40px; width: auto; }
 .nav { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
 .nav a { color: #fff; text-decoration: none; font-family: var(--f-titulo); font-size: .92rem; font-weight: 500; }
 .nav a:hover { color: var(--dorado); }
@@ -69,6 +69,10 @@ img { max-width: 100%; }
 /* Portada */
 .hero { background: var(--azul); color: #fff; padding: 72px 0 64px; position: relative; }
 .hero::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 6px; background: var(--dorado); }
+.hero-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 48px; align-items: center; }
+.hero-logo { width: 100%; height: auto; }
+.auth-logo { display: block; width: 180px; height: auto; margin: 0 auto 20px; }
+.footer-marca img { width: 150px; height: auto; display: block; margin-bottom: 10px; }
 .hero h1 { color: #fff; max-width: 760px; }
 .hero p { font-size: 1.1rem; max-width: 640px; color: #e6edf5; }
 .hero .acciones { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 28px; }
@@ -183,4 +187,6 @@ img { max-width: 100%; }
   .aula aside { position: static; max-height: none; border-right: 0; border-bottom: 1px solid var(--borde); }
   .aula main { padding: 20px 16px 48px; }
   .hero { padding: 48px 0 44px; }
+  .hero-grid { grid-template-columns: 1fr; gap: 28px; }
+  .hero-logo { width: 160px; order: -1; }
 }
