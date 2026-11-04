@@ -6,6 +6,10 @@
 
   const KEY = 'panel-central-pd-v1';
   const THEME_KEY = 'panel-central-theme';
+  /* Modo servidor: la web define window.PANEL_CONFIG = { apiBase: '/api/panel', loginUrl: '/cuenta/login' }.
+     Sin esa configuración el panel guarda los datos en el navegador. */
+  const CFG = Object.assign({ pollSeconds: 30 }, window.PANEL_CONFIG || {});
+  const REMOTE = !!CFG.apiBase;
 
   /* ================= Utilidades ================= */
   const $ = (s, r = document) => r.querySelector(s);
@@ -281,7 +285,7 @@
         { id: uid(), name: 'carolina@prepdiplomacia.com', url: 'mailto:carolina@prepdiplomacia.com', brand: 'ct', category: 'Correo', notes: 'Correo personal' },
       ],
     };
-    return Object.assign(base, seedWorkflowPart());
+    return normalize(Object.assign(base, seedWorkflowPart()));
   }
   function seedWorkflowPart() {
     const t = new Date(); const d = (n) => iso(addDays(t, n));
@@ -316,6 +320,8 @@
       ['workflows', 'items', 'agents', 'reports'].forEach((k) => { if (!Array.isArray(out[k])) out[k] = wp[k]; });
     }
     Object.keys(SCHEMAS).forEach((k) => { if (!Array.isArray(out[k])) out[k] = []; });
+    if (!Array.isArray(out.activity)) out.activity = [];
+    out.meta = Object.assign({ lastEventId: 0 }, out.meta || {});
     out.version = 2;
     return out;
   }
@@ -323,8 +329,141 @@
     try { const raw = localStorage.getItem(KEY); if (raw) return normalize(JSON.parse(raw)); } catch (e) { /* sin almacenamiento */ }
     return seed();
   }
-  let S = load();
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('No se pudo guardar en este navegador'); } }
+  let S = REMOTE ? null : load();
+  function save() {
+    if (REMOTE) return queueRemoteSave();
+    try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { toast('No se pudo guardar en este navegador'); }
+  }
+
+  /* ================= Sincronización con el servidor de la web ================= */
+  const sync = { rev: 0, state: 'idle', at: null, timer: null, inflight: false, again: false, msg: '' };
+  const api = (path, opts = {}) => fetch(CFG.apiBase.replace(/\/$/, '') + path, Object.assign({ credentials: 'include', headers: { 'Content-Type': 'application/json', Accept: 'application/json' } }, opts));
+  function needLogin(res) {
+    if (res.status === 401 || res.status === 403) {
+      const login = CFG.loginUrl || '/cuenta/login';
+      location.href = login + (login.includes('?') ? '&' : '?') + 'ReturnUrl=' + encodeURIComponent(location.pathname + location.search + location.hash);
+      return true;
+    }
+    return false;
+  }
+  function setSync(state, msg) { sync.state = state; sync.msg = msg || ''; if (state === 'ok') sync.at = new Date(); const el = $('#sideFoot'); if (el && S) el.innerHTML = footHtml(); }
+  function queueRemoteSave() { setSync('saving'); clearTimeout(sync.timer); sync.timer = setTimeout(flushRemote, 600); }
+  async function flushRemote() {
+    if (sync.inflight) { sync.again = true; return; }
+    sync.inflight = true;
+    try {
+      const res = await api('/state', { method: 'PUT', body: JSON.stringify({ rev: sync.rev, data: S }) });
+      if (needLogin(res)) return;
+      if (res.status === 409) {
+        const body = await res.json(); S = normalize(body.data); sync.rev = body.rev;
+        render(); toast('Se cargaron cambios hechos en otro dispositivo. Revisa tu último cambio.');
+      } else if (!res.ok) throw new Error('HTTP ' + res.status);
+      else { const body = await res.json(); sync.rev = body.rev; setSync('ok'); }
+    } catch (e) { setSync('error', 'Sin conexión con la web, reintentando…'); setTimeout(queueRemoteSave, 5000); }
+    finally { sync.inflight = false; if (sync.again) { sync.again = false; flushRemote(); } }
+  }
+  async function pullRemote() {
+    if (!REMOTE || !S || sync.inflight || sync.state === 'saving') return;
+    try {
+      const res = await api('/state?since=' + sync.rev);
+      if (needLogin(res)) return;
+      if (res.ok && res.status !== 204) {
+        const body = await res.json();
+        if (body && body.rev > sync.rev && body.data) {
+          sync.rev = body.rev; S = normalize(body.data);
+          if ($('#drawer').hidden && $('#palette').hidden) render();
+        }
+      }
+      const ev = await api('/events?after=' + (S.meta.lastEventId || 0));
+      if (ev.ok) { const list = await ev.json(); if (Array.isArray(list) && list.length) ingestEvents(list); }
+      setSync('ok');
+    } catch (e) { setSync('error', 'Sin conexión con la web, reintentando…'); }
+  }
+  function footHtml() {
+    if (!REMOTE) return 'Datos guardados en este navegador · <a href="#ajustes">Copia de seguridad</a>';
+    const t = sync.at ? `${pad(sync.at.getHours())}:${pad(sync.at.getMinutes())} hs` : '';
+    const dot = sync.state === 'error' ? 'var(--bad)' : sync.state === 'saving' ? 'var(--warn)' : 'var(--ok)';
+    const txt = sync.state === 'error' ? sync.msg : sync.state === 'saving' ? 'Guardando en tu web…' : `Sincronizado con tu web${t ? ' · ' + t : ''}`;
+    return `<span class="row" style="gap:6px"><span class="dot" style="background:${dot}"></span>${esc(txt)}</span>${CFG.user ? `<div style="margin-top:4px">Conectada como ${esc(CFG.user)}${CFG.logoutUrl ? ` · <a href="${esc(CFG.logoutUrl)}">Salir</a>` : ''}</div>` : ''}`;
+  }
+
+  /* ================= Novedades enviadas por los agentes (Claude) ================= */
+  const findBy = (arr, v) => arr.find((x) => x.id === v) || arr.find((x) => String(x.name || x.title || '').toLowerCase() === String(v || '').toLowerCase());
+  const brandOf = (b) => (b === 'ct' || /techera|carolina/i.test(b || '') ? 'ct' : 'pd');
+  function logActivity(source, text, kind) {
+    S.activity.unshift({ id: uid(), at: new Date().toISOString(), source: source || 'Claude', text, kind: kind || 'info' });
+    if (S.activity.length > 200) S.activity.length = 200;
+  }
+  function applyEvent(ev) {
+    const p = ev.payload || {}; const src = ev.source || p.agente || 'Claude';
+    switch (ev.type) {
+      case 'correcciones.informe': {
+        let r;
+        if (p.texto) r = parseReport(String(p.texto));
+        else {
+          r = { id: uid(), date: p.fecha || today(), time: p.hora || '', status: p.estado || 'ok', summary: p.resumen || '', classes: {}, problems: (p.problemas || []).map(String), todos: (p.acciones || []).map((t) => ({ text: String(t), done: false })), pendingNotes: (p.notas || []).map(String), raw: '' };
+          Object.entries(p.clases || {}).forEach(([k, c]) => { r.classes[k] = {}; CORR_STAGES.forEach((st2) => { if (c[st2] != null) r.classes[k][st2] = Number(c[st2]); }); });
+        }
+        ingestReport(r);
+        logActivity(src, `Informe de correcciones del ${fmtDate(r.date)}: ${num(reportTotals(r).revision)} en tu revisión${r.status === 'falla' ? ' · con falla' : ''}`, r.status === 'falla' ? 'bad' : 'ok');
+        return true;
+      }
+      case 'agente.corrida': {
+        let a = findBy(S.agents, p.agente);
+        if (!a) { a = { id: 'ag-' + uid(), name: String(p.agente || 'Agente'), brand: brandOf(p.marca), time: p.hora || '', tz: p.zona || '', desc: p.descripcion || '', wf: '', link: 'https://claude.ai/code' }; S.agents.push(a); }
+        a.lastRun = p.fecha || today(); a.lastStatus = ['ok', 'aviso', 'falla'].includes(p.estado) ? p.estado : 'ok'; a.lastNote = String(p.nota || '').slice(0, 300);
+        if (p.enlace) a.link = p.enlace;
+        logActivity(a.name, p.nota || (a.lastStatus === 'falla' ? 'Corrida con falla' : 'Corrida completada'), a.lastStatus === 'falla' ? 'bad' : 'ok');
+        return true;
+      }
+      case 'workflow.item': {
+        const w = findBy(S.workflows, p.workflow) || S.workflows[0]; if (!w) return false;
+        const stg = w.stages.find((x) => x.id === p.etapa || x.name.toLowerCase() === String(p.etapa || '').toLowerCase()) || w.stages[0];
+        let it = p.clave ? S.items.find((x) => x.key === p.clave) : null;
+        const isNew = !it;
+        if (!it) { it = { id: uid(), wf: w.id, key: p.clave || '' }; S.items.push(it); }
+        Object.assign(it, { wf: w.id, stage: stg.id, title: p.titulo || it.title || 'Sin título', brand: brandOf(p.marca || it.brand), owner: p.responsable || it.owner || 'Agente IA', due: p.fecha || it.due || '', link: p.enlace || it.link || '', notes: p.notas || it.notes || '', updated: today() });
+        if (p.cantidad) it.count = Number(p.cantidad);
+        logActivity(src, `${isNew ? 'Nuevo en' : 'Actualizado en'} ${w.name}: ${it.title} (${stg.name})`, 'ia');
+        return true;
+      }
+      case 'tarea.nueva': {
+        if (p.clave && S.tasks.some((t) => t.key === p.clave)) return false;
+        S.tasks.push({ id: uid(), key: p.clave || '', title: p.titulo || 'Tarea', brand: brandOf(p.marca), due: p.fecha || today(), time: p.hora || '', priority: p.prioridad || 'media', status: 'pendiente', repeat: 'none', notes: p.notas || '' });
+        logActivity(src, `Nueva tarea: ${p.titulo}`, 'info'); return true;
+      }
+      case 'metrica': {
+        const key = (METRIC_KEYS.find((m) => m[0] === p.metrica || m[1].toLowerCase() === String(p.metrica || '').toLowerCase()) || [p.metrica])[0];
+        if (!key || p.valor == null) return false;
+        S.metrics.push({ id: uid(), key, brand: brandOf(p.marca), date: p.fecha || today(), value: Number(p.valor), notes: p.nota || '' });
+        logActivity(src, `${metricLabel(key)}: ${num(p.valor)}`, 'info'); return true;
+      }
+      case 'movimiento': {
+        if (p.importe == null) return false;
+        S.transactions.push({ id: uid(), type: p.tipo === 'gasto' ? 'gasto' : 'ingreso', date: p.fecha || today(), desc: p.concepto || 'Movimiento', brand: brandOf(p.marca), category: p.categoria || (p.tipo === 'gasto' ? 'Otros gastos' : 'Otros ingresos'), amount: Number(p.importe), currency: ['USD', 'EUR'].includes(p.moneda) ? p.moneda : 'UYU', status: p.estado === 'pendiente' ? 'pendiente' : 'cobrado', notes: p.notas || '' });
+        logActivity(src, `${p.tipo === 'gasto' ? 'Gasto' : 'Ingreso'} registrado: ${p.concepto} (${money(p.importe, p.moneda)})`, 'info'); return true;
+      }
+      case 'publicacion': {
+        let po = p.clave ? S.posts.find((x) => x.key === p.clave) : null;
+        if (!po) { po = { id: uid(), key: p.clave || '' }; S.posts.push(po); }
+        Object.assign(po, { title: p.titulo || po.title, brand: brandOf(p.marca || po.brand), channel: p.canal || po.channel || 'Instagram', format: p.formato || po.format || 'Carrusel', status: p.estado || po.status || 'idea', date: p.fecha || po.date || today(), time: p.hora || po.time || '', link: p.enlace || po.link || '' });
+        ['alcance:reach', 'interacciones:interactions', 'guardados:saves'].forEach((m) => { const [a, b] = m.split(':'); if (p[a] != null) po[b] = Number(p[a]); });
+        logActivity(src, `Publicación: ${po.title} (${label(POST_STATUS, po.status)})`, 'info'); return true;
+      }
+      case 'nota': logActivity(src, String(p.texto || ''), p.nivel || 'info'); return true;
+      default: return false;
+    }
+  }
+  function ingestEvents(list) {
+    let n = 0;
+    list.sort((a, b) => Number(a.id) - Number(b.id)).forEach((ev) => {
+      if (Number(ev.id) <= Number(S.meta.lastEventId || 0)) return;
+      try { if (applyEvent(ev)) n++; } catch (e) { logActivity('Panel', `No se pudo aplicar una novedad (${ev.type})`, 'bad'); }
+      S.meta.lastEventId = Number(ev.id);
+    });
+    save();
+    if (n) { if ($('#drawer').hidden && $('#palette').hidden) render(); toast(n === 1 ? '1 novedad de tus agentes' : `${n} novedades de tus agentes`); }
+  }
 
   const ui = { route: 'inicio', param: '', brand: 'all', taskView: 'tablero', taskFilter: 'abiertas', calMonth: new Date(), finMonth: ym(today()), finType: 'todos', metricKey: 'ig_seguidores', postView: 'tablero', agendaTab: 'google' };
   try { const p = JSON.parse(localStorage.getItem(KEY + '-ui') || '{}'); ['brand', 'taskView', 'taskFilter', 'metricKey', 'postView', 'agendaTab'].forEach((k) => { if (p[k]) ui[k] = p[k]; }); } catch (e) { /* sin preferencias */ }
@@ -627,6 +766,9 @@
             <iframe class="gcal" src="${esc(gcalEmbed('AGENDA'))}" height="340" loading="lazy" title="Google Calendar"></iframe>
             <div class="small muted" style="margin-top:6px">Desde Google Calendar. Si no ves tus eventos, inicia sesión en Google en este navegador.</div>
           </div>
+          <div class="card"><div class="ch"><h2>${icon('inbox')}Actividad reciente</h2><span class="pill ${REMOTE ? 'ok' : ''}">${REMOTE ? 'En vivo' : 'Local'}</span></div>
+            ${S.activity.length ? `<ul class="list">${S.activity.slice(0, 6).map((a) => { const d = new Date(a.at); return `<li><span class="dot" style="background:${a.kind === 'bad' ? 'var(--bad)' : a.kind === 'ia' ? 'var(--ia)' : 'var(--ok)'}"></span><div class="grow"><div class="t" style="font-weight:600;font-size:13px">${esc(a.text)}</div><div class="m">${esc(a.source)} · ${fmtDate(iso(d))} ${pad(d.getHours())}:${pad(d.getMinutes())} hs</div></div></li>`; }).join('')}</ul>` : `<div class="empty">${REMOTE ? 'Aquí aparece lo que tus agentes de Claude envían al panel.' : 'Cuando el panel esté en tu web, aquí aparece en vivo lo que hacen tus agentes de Claude.'}</div>`}
+          </div>
           <div class="card"><div class="ch"><h2>${icon('agentes')}Agentes de hoy</h2><a class="btn sm" href="#agentes">Ver</a></div>
             <div class="timeline">${agToday.map((a) => `<div class="tl ${a.lastStatus}"><div class="row between"><span class="h">${esc(a.time)} hs <span class="muted small" style="font-weight:600">${esc(a.tz)}</span></span>${a.lastStatus === 'falla' ? '<span class="pill bad">Falla</span>' : ''}</div><div class="small">${esc(a.name)}</div></div>`).join('') || '<div class="empty">Sin agentes</div>'}</div>
           </div>
@@ -893,11 +1035,12 @@
     $('#nav').innerHTML = NAV.map(([g, items]) => `<div class="grp">${g}</div>` + items.map(([k, l]) => { const c = counts[k]; return `<a href="#${k}" class="${active === k ? 'active' : ''}">${icon(k)}<span>${l}</span>${c && c[0] ? `<span class="count ${c[1] ? 'alert' : ''}">${c[0]}</span>` : ''}</a>`; }).join('')).join('');
     $('#brandFilter').innerHTML = [['all', 'Ambas']].concat(BRANDS.map((b) => [b.id, b.short])).map(([id, n]) => `<button class="${ui.brand === id ? 'active' : ''}" data-action="brand" data-v="${id}">${id === 'all' ? '' : brandDot(id)}${esc(n)}</button>`).join('');
     $('#themeBtn').innerHTML = icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon');
-    $('#sideFoot').innerHTML = `Datos guardados en este navegador · <a href="#ajustes">Copia de seguridad</a>`;
+    $('#sideFoot').innerHTML = footHtml();
     $('#main').innerHTML = (VIEWS[ui.route] || VIEWS.inicio)();
     document.title = `${ui.route === 'workflow' ? (wfById(ui.param) || {}).name || 'Workflow' : ROUTE_NAMES[ui.route] || 'Inicio'} · Panel Central`;
   }
   function route() {
+    if (!S) return;
     const h = decodeURIComponent(location.hash.slice(1));
     const [r, p] = h.split('/');
     ui.route = VIEWS[r] ? r : 'inicio'; ui.param = p || '';
@@ -982,15 +1125,19 @@
   }
   function saveReport() {
     if (!pendingReport) return;
-    const r = pendingReport; const prev = latestReport();
+    ingestReport(pendingReport);
+    logActivity('Tú', `Informe de correcciones del ${fmtDate(pendingReport.date)} cargado a mano`, 'info');
+    pendingReport = null; save(); closeDrawer(); render(); toast('Informe guardado y workflow actualizado');
+  }
+  function ingestReport(r) {
+    const prev = latestReport();
     if (!Object.keys(r.classes).length && prev) { r.classes = JSON.parse(JSON.stringify(prev.classes)); r.pendingNotes = ['Cantidades sin cambios: se mantienen las del informe anterior']; }
     S.reports = S.reports.filter((x) => !(x.date === r.date && x.time === r.time));
     S.reports.push(r);
     if (S.reports.length > 60) S.reports = S.reports.slice(-60);
     syncCorrections(r);
     const ag = S.agents.find((a) => a.id === 'ag-corr' || a.wf === 'wf-corr');
-    if (ag) { ag.lastRun = r.date; ag.lastStatus = r.status; ag.lastNote = r.summary.slice(0, 220); }
-    pendingReport = null; save(); closeDrawer(); render(); toast('Informe guardado y workflow actualizado');
+    if (ag) { ag.lastRun = r.date; ag.lastStatus = r.status; ag.lastNote = String(r.summary || '').slice(0, 220); }
   }
 
   /* ================= Paleta de comandos ================= */
@@ -1164,6 +1311,23 @@
   document.addEventListener('dragend', () => { drag = null; document.querySelectorAll('.col.over').forEach((x) => x.classList.remove('over')); });
 
   window.addEventListener('hashchange', route);
-  save();
-  route();
+  async function boot() {
+    if (!REMOTE) { save(); route(); return; }
+    $('#main').innerHTML = '<div class="empty" style="padding:80px 10px">Conectando con tu web…</div>';
+    try {
+      const res = await api('/state');
+      if (needLogin(res)) return;
+      if (!res.ok && res.status !== 404) throw new Error('HTTP ' + res.status);
+      const body = res.status === 404 ? null : await res.json();
+      if (body && body.data) { S = normalize(body.data); sync.rev = body.rev || 0; setSync('ok'); }
+      else { S = seed(); sync.rev = body ? body.rev || 0 : 0; save(); }
+      route();
+      pullRemote();
+      setInterval(pullRemote, Math.max(10, Number(CFG.pollSeconds) || 30) * 1000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) pullRemote(); });
+    } catch (e) {
+      $('#main').innerHTML = `<div class="card" style="max-width:560px;margin:60px auto;text-align:center"><h2>No se pudo conectar con tu web</h2><p class="muted">${esc(e.message)}. Revisa tu conexión y vuelve a cargar la página.</p><button class="btn primary" onclick="location.reload()">Reintentar</button></div>`;
+    }
+  }
+  boot();
 })();

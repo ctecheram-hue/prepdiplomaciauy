@@ -32,6 +32,15 @@ Panel de gestión que reúne las dos marcas en un solo lugar, organizado en work
 - `N`: crear algo nuevo.
 - `Esc`: cerrar paneles.
 
+## Modo servidor y tiempo real
+
+Integrado en la web (ver `integracion/LEEME_DESARROLLADOR.md`), el panel funciona así:
+- Se abre después de iniciar sesión.
+- Guarda los datos en el servidor, sincronizados entre dispositivos.
+- Recibe cada 30 segundos las novedades que envían los agentes de Claude (ver `integracion/AGENTES_CLAUDE.md`).
+
+`servidor/server.mjs` es la implementación de referencia, probada de punta a punta, y también se puede publicar sola.
+
 ## Datos y privacidad
 
-Los datos se guardan en el navegador (localStorage); el repositorio solo contiene datos de ejemplo y cantidades agregadas. Descarga una copia de seguridad desde **Ajustes** con regularidad. Google Calendar se muestra si el navegador tiene la sesión de Google iniciada con la cuenta dueña de los calendarios.
+En modo local los datos se guardan en el navegador (localStorage); el repositorio solo contiene datos de ejemplo y cantidades agregadas. Descarga una copia de seguridad desde **Ajustes** con regularidad. Google Calendar se muestra si el navegador tiene la sesión de Google iniciada con la cuenta dueña de los calendarios.
