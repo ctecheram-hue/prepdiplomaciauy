@@ -52,7 +52,7 @@
   const CONTACT_TYPES = ['Alumno/a', 'Interesado/a', 'Cliente', 'Aliado/a', 'Docente', 'Proveedor', 'Otro'];
   const CRM_STAGES = [['nuevo', 'Nuevo', '#94A3B8'], ['contactado', 'Contactado', '#5B8FC7'], ['reunion', 'Reunión', '#6B4FBB'], ['propuesta', 'Propuesta', '#C6A75E'], ['activo', 'Alumno o cliente activo', '#1F8A5B'], ['inactivo', 'Inactivo', '#64768C'], ['perdido', 'Perdido', '#C2413A']];
   const INTER_TYPES = [['nota', 'Nota'], ['llamada', 'Llamada'], ['reunion', 'Reunión'], ['correo', 'Correo'], ['whatsapp', 'WhatsApp'], ['pago', 'Pago'], ['clase', 'Clase o devolución'], ['otro', 'Otro']];
-  const SOURCES = ['Instagram', 'Web', 'Recomendación', 'Google Calendar', 'Calendly', 'LinkedIn', 'Correo', 'Evento', 'Importación', 'Otro'];
+  const SOURCES = ['Instagram', 'WhatsApp', 'Web', 'Recomendación', 'Google Calendar', 'Calendly', 'LinkedIn', 'Correo', 'Evento', 'Notion', 'Importación', 'Otro'];
   const OWNERS = ['Carolina', 'Agente IA', 'Colaborador/a'];
   const label = (arr, v) => (arr.find((a) => a[0] === v) || [v, v])[1];
 
