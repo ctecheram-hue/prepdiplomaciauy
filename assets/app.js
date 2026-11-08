@@ -611,7 +611,7 @@
 
   /* ================= Gráficos ================= */
   function barChart(groups, series, opts = {}) {
-    if (!groups.length) return '<div class="empty">Sin datos todavía</div>';
+    if (!groups.length || groups.every((g) => g.values.every((v) => !v))) return '<div class="empty">Sin datos todavía</div>';
     const W = 640, H = opts.h || 230, Pd = { l: 52, r: 8, t: 10, b: 26 };
     const max = Math.max(1, ...groups.flatMap((g) => g.values)) * 1.1;
     const iw = W - Pd.l - Pd.r, ih = H - Pd.t - Pd.b, gw = iw / groups.length, bw = Math.min(22, (gw * 0.66) / series.length);
@@ -682,7 +682,7 @@
     return `<li class="${t.status === 'hecha' ? 'done' : ''}">
       <button class="check ${t.status === 'hecha' ? 'on' : ''}" data-action="toggle-task" data-id="${t.id}" aria-label="Marcar como hecha">${t.status === 'hecha' ? '✓' : ''}</button>
       <div class="grow"><div class="t">${esc(t.title)}</div>
-      <div class="m">${brandDot(t.brand)}<span>${t.due ? fmtDate(t.due) : 'Sin fecha'}${t.time ? ' · ' + esc(t.time) + ' hs' : ''}</span>${t.project ? `<span>· ${esc(projName(t.project))}</span>` : ''}${t.repeat && t.repeat !== 'none' ? '<span title="Recurrente">· ↻</span>' : ''}</div></div>
+      <div class="m one">${brandDot(t.brand)}<span>${t.due ? (t.due === today() ? 'Hoy' : fmtDate(t.due)) : 'Sin fecha'}${t.time ? ' · ' + esc(t.time) + ' hs' : ''}${t.repeat && t.repeat !== 'none' ? ' · ↻' : ''}${t.project ? ' · ' + esc(projName(t.project)) : ''}</span></div></div>
       ${late ? '<span class="pill solid-bad">Vencida</span>' : `<span class="pill ${t.priority}">${esc(t.priority || '')}</span>`}
       <button class="iconbtn" data-action="edit" data-entity="tasks" data-id="${t.id}" aria-label="Editar">${icon('edit')}</button></li>`;
   }
@@ -709,89 +709,105 @@
   /* ================= Vistas ================= */
   const VIEWS = {};
 
+  /* ================= Inicio: "¿qué hago ahora?" ================= */
+  const SKIP_LINE = /^(CORREO NO ENVIADO|Este texto reemplaza|Qu[eé] fall[oó]|Estado de las carpetas|Lo que tienes que hacer|Decisiones)/i;
+  function cleanText(s, max = 160) {
+    const lines = String(s || '').split('\n').map((l) => l.replace(/[*#>`]/g, '').replace(/^\s*\d+[.)]\s*/, '').trim()).filter((l) => l.length > 12 && !SKIP_LINE.test(l));
+    const first = (lines[0] || String(s || '').replace(/[*#>`]/g, '').trim()).split(/(?<=[.!?])\s/)[0];
+    return first.length > max ? first.slice(0, max - 1) + '…' : first;
+  }
+  const shortName = (n) => String(n || '').replace(/\s*[-·]\s*(Prep Diplomacia Uy|Carolina Techera RRII)$/i, '');
+  function relTime(d) {
+    const min = Math.round((d - new Date()) / 60000);
+    if (min <= 0) return 'Ahora';
+    if (min < 60) return `En ${min} min`;
+    return `A las ${hhmm(d)} hs`;
+  }
+  const isDismissed = (key) => { const d = S.meta.dismissed || {}; return d[key] && d[key] > today(); };
+  function focusItems() {
+    const out = []; const now = new Date(); const td = today(); const pd = ui.brand !== 'ct';
+    const push = (o) => { if (!o.key || !isDismissed(o.key)) out.push(o); };
+    const rep = latestReport(); const tot = reportTotals(rep);
+    const corrAgent = S.agents.find((a) => /correcciones diarias/i.test(a.name || ''));
+    if (pd && ((rep && rep.status === 'falla') || (corrAgent && corrAgent.lastStatus === 'falla'))) {
+      push({ key: 'corr-fail:' + ((corrAgent && corrAgent.lastRun) || (rep && rep.date) || td), level: 'bad', ic: 'alert', title: 'El agente de correcciones no pudo leer Moodle', sub: 'Moodle pidió iniciar sesión. Entra a Moodle y vuelve a correr el agente.', dismiss: true,
+        actions: [{ label: 'Iniciar sesión en Moodle', href: MOODLE + '/login/index.php', primary: true }, { label: 'Copiar la orden para Claude', action: 'copy', text: 'corre el agente de correcciones' }] });
+    }
+    byBrand(S.agents).filter((a) => a.lastStatus === 'falla' && a !== corrAgent).forEach((a) => push({ key: 'ag-fail:' + a.id + ':' + (a.lastRun || ''), level: 'bad', ic: 'agentes', title: `Falló: ${shortName(a.name)}`, sub: cleanText(a.lastNote), dismiss: true, actions: [{ label: 'Ver la corrida', href: a.sessionId ? a.link : '#agentes', primary: true }] }));
+    if (LIVE.mcp) {
+      LIVE.sessions.filter((x) => x.needs || /BLOCKED/.test(x.bucket)).slice(0, 3).forEach((x) => push({ key: 'ses:' + x.id + ':' + x.updated, level: 'ia', ic: 'agentes', title: `Claude espera tu respuesta: ${x.title}`, sub: cleanText(x.needs), dismiss: true, actions: [{ label: 'Responder', href: sessionUrl(x.id), primary: true }] }));
+      const next = LIVE.events.find((e) => e.start && e.start.dateTime && evStart(e) >= new Date(now - 15 * 60e3));
+      if (next && evStart(next) - now < 3 * 3600e3) push({ key: 'ev:' + next.id, level: 'info', ic: 'agenda', title: `${relTime(evStart(next))}: ${next.summary || 'evento'}`, sub: `${hhmm(evStart(next))} hs · ${evKind(next) === 'devolucion' ? 'Devolución con un alumno' : evKind(next) === 'consulta' ? 'Sesión de consultas' : 'Google Calendar'}`,
+        actions: next.conferenceUrl ? [{ label: 'Unirse a Meet', href: next.conferenceUrl, primary: true }, { label: 'Ver evento', href: next.htmlLink }] : [{ label: 'Ver evento', href: next.htmlLink, primary: true }] });
+    }
+    byBrand(S.tasks).filter((t) => t.status !== 'hecha' && t.due && t.due <= td).sort((a, b) => (a.due + (a.time || '')).localeCompare(b.due + (b.time || ''))).slice(0, 5)
+      .forEach((t) => push({ level: t.due < td ? 'bad' : 'warn', ic: 'tareas', title: t.title, sub: (t.due < td ? `Vencida el ${fmtDate(t.due)}` : 'Para hoy') + (t.time ? ` · ${t.time} hs` : ''), task: t.id,
+        actions: [{ label: 'Listo', action: 'toggle-task', id: t.id, primary: true }, { label: 'Pasar a mañana', action: 'snooze-task', id: t.id }, { label: 'Editar', action: 'edit', entity: 'tasks', id: t.id }] }));
+    if (pd && tot.revision) {
+      const cls = Object.entries(rep.classes).filter(([, c]) => c.revision).map(([k, c]) => `${classMeta(k).label.replace(' · Tarea 1', '')}: ${c.revision}`);
+      const corrTask = out.find((o) => o.task && /correcci/i.test(o.title));
+      if (corrTask) { corrTask.title = `${corrTask.title} (${num(tot.revision)})`; corrTask.sub += ' · ' + cls.slice(0, 3).join(' · '); corrTask.actions.splice(1, 0, { label: 'Ver por clase', href: '#correcciones' }); }
+      else push({ key: 'corr-rev:' + (rep.date || '') + ':' + tot.revision, level: 'warn', ic: 'correcciones', title: `Revisar ${plural(tot.revision, 'corrección', 'correcciones')} y subirlas a Moodle`, sub: cls.slice(0, 4).join(' · ') + (cls.length > 4 ? ' …' : ''), dismiss: true, actions: [{ label: 'Ver por clase', href: '#correcciones', primary: true }] });
+    }
+    if (S.settings.mailEnabled && LIVE.mail.length) push({ key: 'mail:' + LIVE.mail[0].id, level: 'info', ic: 'inbox', title: `${plural(LIVE.mail.length, 'correo sin leer', 'correos sin leer')}`, sub: LIVE.mail.slice(0, 2).map((m) => m.subject).join(' · '), dismiss: true, actions: [{ label: 'Abrir Gmail', href: `https://mail.google.com/mail/?authuser=${encodeURIComponent(S.settings.mailAccount || '')}#inbox`, primary: true }] });
+    Object.entries(LIVE.src).filter(([, v]) => v.state === 'blocked' || v.state === 'error').forEach(([k, v]) => push({ key: 'conn:' + k + ':' + (v.code || ''), level: v.state === 'blocked' ? 'warn' : 'bad', ic: 'ajustes', title: v.state === 'blocked' ? 'Falta un permiso para conectar' : 'Una conexión necesita atención', sub: v.msg, dismiss: true, actions: v.state === 'blocked' ? [{ label: 'Permitir', action: 'live-refresh', primary: true }] : [{ label: 'Ver conexiones', href: '#ajustes', primary: true }] }));
+    byBrand(S.contacts).filter((c) => c.followup && c.followup <= td).slice(0, 2).forEach((c) => push({ key: 'fu:' + c.id + ':' + c.followup, level: 'info', ic: 'contactos', title: `Hacer seguimiento a ${c.name}`, sub: `${c.type}${c.notes ? ' · ' + cleanText(c.notes, 90) : ''}`, dismiss: true, actions: [c.email ? { label: 'Escribir', href: `mailto:${c.email}`, primary: true } : { label: 'Ver contacto', action: 'edit', entity: 'contacts', id: c.id, primary: true }, { label: 'Listo', action: 'followup-done', id: c.id }] }));
+    const f = finance(ym(td)); if (f.pend > 0) push({ key: 'cobro:' + ym(td) + ':' + Math.round(f.pend), level: 'info', ic: 'contabilidad', title: `${money(f.pend)} por cobrar este mes`, sub: 'Ingresos marcados como pendientes.', dismiss: true, actions: [{ label: 'Ver movimientos', href: '#contabilidad', primary: true }] });
+    const order = { bad: 0, ia: 1, warn: 2, info: 3 };
+    return out.map((o, i) => Object.assign(o, { i })).sort((a, b) => order[a.level] - order[b.level] || a.i - b.i);
+  }
+  function actionBtn(a) {
+    const cls = `btn sm ${a.primary ? 'primary' : ''}`;
+    if (a.href) { const ext = /^https?:|^mailto:/.test(a.href); return `<a class="${cls}" href="${esc(a.href)}"${ext ? ' target="_blank" rel="noopener"' : ''}>${esc(a.label)}${ext && !/^mailto:/.test(a.href) ? ' ' + icon('ext') : ''}</a>`; }
+    return `<button class="${cls}" data-action="${esc(a.action)}"${a.id ? ` data-id="${esc(a.id)}"` : ''}${a.entity ? ` data-entity="${esc(a.entity)}"` : ''}${a.text ? ` data-text="${esc(a.text)}"` : ''}>${esc(a.label)}</button>`;
+  }
+  function focusRow(o) {
+    return `<li class="focus"><span class="fic ${o.level}">${icon(o.ic)}</span><div class="grow"><div class="t">${esc(o.title)}</div>${o.sub ? `<div class="m">${esc(o.sub)}</div>` : ''}<div class="facts">${o.actions.map(actionBtn).join('')}</div></div>${o.dismiss ? `<button class="iconbtn" data-action="dismiss" data-key="${esc(o.key)}" title="Ocultar hasta mañana" aria-label="Ocultar hasta mañana">✕</button>` : ''}</li>`;
+  }
+
   VIEWS.inicio = () => {
     const now = new Date(); const h = now.getHours();
     const saludo = h < 12 ? 'Buenos días' : h < 20 ? 'Buenas tardes' : 'Buenas noches';
+    const items = focusItems();
+    const urgent = items.filter((o) => o.level === 'bad').length;
+    const evToday = LIVE.events.filter((e) => iso(evStart(e)) === today() && (!e.end || !e.end.dateTime || new Date(e.end.dateTime) > now));
+    const next = LIVE.events.find((e) => e.start && e.start.dateTime && evStart(e) > now);
+    const parts = [];
+    if (items.length) parts.push(`${plural(items.length, 'cosa', 'cosas')} en tu foco${urgent ? `, ${urgent} ${urgent === 1 ? 'urgente' : 'urgentes'}` : ''}`);
+    if (LIVE.mcp) parts.push(evToday.length ? `${plural(evToday.length, 'evento')} hoy` : 'agenda libre por hoy');
+    const summary = parts.length ? 'Tienes ' + parts.join(' y ') + '.' : 'Todo en orden por ahora.';
+    const shown = ui.focusAll ? items : items.slice(0, 5);
     const open = byBrand(S.tasks).filter((t) => t.status !== 'hecha');
-    const late = open.filter(isLate);
-    const todayTasks = open.filter((t) => t.due && t.due <= today());
-    const rep = latestReport(); const tot = reportTotals(rep);
-    const f = finance(ym(today()));
-    const al = latestMetric('alumnos');
-    const ags = byBrand(S.agents); const agFail = ags.filter((a) => a.lastStatus === 'falla');
-    const week = iso(addDays(now, 7));
-    const postsWeek = byBrand(S.posts).filter((p) => p.status === 'programada' && p.date >= today() && p.date <= week);
-    const fu = byBrand(S.contacts).filter((c) => c.followup && c.followup <= today());
-
-    const attn = [];
-    if (rep && rep.status === 'falla' && (ui.brand !== 'ct')) attn.push(['bad', 'alert', 'El agente de correcciones no pudo leer Moodle', `Informe del ${fmtDate(rep.date)}. Inicia sesión en Moodle y vuelve a correrlo.`, '#correcciones']);
-    if (tot.revision && ui.brand !== 'ct') attn.push(['warn', 'correcciones', `${plural(tot.revision, 'corrección', 'correcciones')} esperan tu revisión`, `${plural(Object.values(rep.classes).filter((c) => c.revision).length, 'clase')} con correcciones listas para subir a Moodle.`, '#correcciones']);
-    agFail.filter((a) => a.id !== 'ag-corr').forEach((a) => attn.push(['bad', 'agentes', `Falla en ${a.name}`, a.lastNote || 'Revisa la última corrida.', '#agentes']));
-    if (late.length) attn.push(['bad', 'tareas', `${plural(late.length, 'tarea vencida', 'tareas vencidas')}`, late.slice(0, 2).map((t) => t.title).join(' · '), '#tareas']);
-    if (fu.length) attn.push(['info', 'contactos', `${plural(fu.length, 'seguimiento pendiente', 'seguimientos pendientes')}`, fu.slice(0, 2).map((c) => c.name).join(' · '), '#contactos']);
-    if (LIVE.mcp) {
-      const waiting = LIVE.sessions.filter((x) => x.needs || /BLOCKED/.test(x.bucket));
-      if (waiting.length) attn.push(['ia', 'agentes', `${plural(waiting.length, 'conversación', 'conversaciones')} de Claude ${waiting.length === 1 ? 'espera' : 'esperan'} tu respuesta`, waiting.slice(0, 2).map((x) => x.title).join(' · '), '#agentes']);
-      const dev = LIVE.events.filter((e) => evKind(e) === 'devolucion' && iso(evStart(e)) === today());
-      if (dev.length) attn.push(['warn', 'agenda', `${plural(dev.length, 'devolución', 'devoluciones')} con alumnos hoy`, dev.map((e) => hhmm(evStart(e)) + ' hs').join(' · '), '#agenda']);
-      const bad = Object.entries(LIVE.src).filter(([, v]) => v.state === 'error' || v.state === 'blocked');
-      if (bad.length) attn.push(['bad', 'ajustes', 'Hay conexiones que revisar', bad.map(([, v]) => v.msg).join(' '), '#ajustes']);
-      if (S.settings.mailEnabled && LIVE.mail.length) attn.push(['info', 'inbox', `${plural(LIVE.mail.length, 'correo pendiente', 'correos pendientes')}`, LIVE.mail.slice(0, 2).map((m) => m.subject).join(' · '), '#agentes']);
-    }
-    if (f.pend > 0) attn.push(['info', 'contabilidad', `${money(f.pend)} por cobrar este mes`, 'Ingresos marcados como pendientes.', '#contabilidad']);
-    const wfAgenda = byBrand(S.items).filter((i) => i.due === today() && i.owner === 'Agente IA');
-    if (wfAgenda.length) attn.push(['ia', 'agentes', `${plural(wfAgenda.length, 'propuesta', 'propuestas')} de los agentes para elegir hoy`, wfAgenda.map((i) => i.title).slice(0, 2).join(' · '), '#workflows']);
-
-    const months = last12().slice(-6);
-    const groups = months.map((k) => { const x = finance(k); return { label: MONTHS_S[Number(k.slice(5)) - 1], values: [x.inc, x.exp] }; });
-    const wfs = byBrand(S.workflows).map((w) => ({ w, n: wfItems(w).length })).sort((a, b) => b.n - a.n).slice(0, 4);
-    const agToday = ags.slice().sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    const upcoming = open.filter((t) => t.due && t.due <= week).sort((a, b) => (a.due + (a.time || '')).localeCompare(b.due + (b.time || ''))).slice(0, 6);
-
-    return `<section class="hero">
-        <h1>${saludo}, ${esc(S.settings.owner || 'Carolina')}</h1>
-        <p>Hoy es ${DOW_L[now.getDay()]} ${now.getDate()} de ${MONTHS[now.getMonth()]} · ${ui.brand === 'all' ? 'ambas marcas' : esc(brandName(ui.brand))}</p>
-        <div class="chips">
-          ${ui.brand !== 'ct' ? `<a class="hchip" href="#correcciones">${icon('correcciones')}${plural(tot.revision, 'corrección', 'correcciones')} en tu revisión</a>` : ''}
-          <a class="hchip" href="#tareas">${icon('tareas')}${plural(todayTasks.length, 'tarea')} para hoy</a>
-          <a class="hchip" href="#agentes">${icon('agentes')}${ags.length - agFail.length} de ${ags.length} agentes sin fallas</a>
-          <a class="hchip" href="#agenda">${icon('agenda')}Ver agenda</a>
-        </div>
+    const rep = latestReport(); const tot = reportTotals(rep); const al = latestMetric('alumnos'); const f = finance(ym(today()));
+    const hasMoney = f.tx.length > 0;
+    const week = byBrand(S.tasks).filter((t) => t.status !== 'hecha' && t.due && t.due > today() && t.due <= iso(addDays(now, 7))).sort((a, b) => a.due.localeCompare(b.due)).slice(0, 4);
+    const running = byBrand(S.workflows).map((w) => ({ w, chips: w.stages.map((s) => [s, stageCount(w, s.id)]).filter(([, n]) => n > 0) })).filter((x) => x.chips.length);
+    const acts = S.activity.slice(0, 4);
+    return `<section class="hero compact">
+        <div class="row between" style="align-items:flex-start;gap:12px"><div><h1>${saludo}, ${esc(S.settings.owner || 'Carolina')}</h1>
+        <p>${DOW_L[now.getDay()].replace(/^./, (c) => c.toUpperCase())} ${now.getDate()} de ${MONTHS[now.getMonth()]} · ${esc(summary)}</p></div>
+        ${next ? `<a class="hchip next" href="${esc(next.conferenceUrl || next.htmlLink || '#agenda')}" ${next.conferenceUrl || next.htmlLink ? 'target="_blank" rel="noopener"' : ''}>${icon('clock')}<span><strong>${iso(evStart(next)) === today() ? hhmm(evStart(next)) + ' hs' : DOW[(evStart(next).getDay() + 6) % 7] + ' ' + hhmm(evStart(next))}</strong> ${esc(cleanText(next.summary, 48))}</span></a>` : ''}</div>
       </section>
-      <div class="grid g-kpi" style="margin-bottom:16px">
-        <div class="card kpi accent"><div class="l">${icon('tareas')}Tareas abiertas</div><div class="v">${open.length}</div><div class="s ${late.length ? 'down' : ''}">${plural(late.length, 'vencida')}</div></div>
-        <div class="card kpi accent"><div class="l">${icon('correcciones')}En tu revisión</div><div class="v">${num(tot.revision)}</div><div class="s">${num(tot.devuelta)} ya devueltas</div></div>
-        <div class="card kpi accent"><div class="l">${icon('contabilidad')}Resultado del mes</div><div class="v ${f.net < 0 ? 'down' : ''}">${money(f.net)}</div><div class="s">Ingresos ${money(f.inc)}</div></div>
-        <div class="card kpi accent"><div class="l">${icon('user')}Alumnos activos</div><div class="v">${al.last ? num(al.last.value) : '–'}</div><div class="s">${al.last ? 'al ' + fmtDate(al.last.date) : 'registrar en Métricas'}</div></div>
-        <div class="card kpi accent"><div class="l">${icon('marketing')}Programadas (7 días)</div><div class="v">${postsWeek.length}</div><div class="s">publicaciones</div></div>
-      </div>
       <div class="grid g-main">
         <div class="stack">
-          <div class="card"><div class="ch"><h2>Requiere tu atención</h2><span class="pill">${attn.length}</span></div>
-            ${attn.length ? `<div class="attn">${attn.map(([lvl, ic, t, m, href]) => `<a href="${href}"><span class="ic ${lvl}">${icon(ic)}</span><span style="min-width:0"><div class="t">${esc(t)}</div><div class="m">${esc(m)}</div></span><span class="go">${icon('chev')}</span></a>`).join('')}</div>` : '<div class="empty">Todo en orden. Nada urgente por ahora.</div>'}
+          <div class="card"><div class="ch"><h2>Tu foco ahora</h2>${items.length > 5 ? `<button class="btn sm ghost" data-action="set" data-k="focusAll" data-v="${ui.focusAll ? '' : '1'}">${ui.focusAll ? 'Ver menos' : `Ver ${items.length - 5} más`}</button>` : ''}</div>
+            ${items.length ? `<ul class="list">${shown.map(focusRow).join('')}</ul>` : `<div class="empty big">${icon('ok')}<div><strong>Nada pendiente para hoy.</strong><br>Cuando tus agentes, tu agenda o tu correo traigan algo, aparece aquí.</div></div>`}
           </div>
-          <div class="card"><div class="ch"><h2>Workflows</h2><a class="btn sm" href="#workflows">Ver todos</a></div>
-            <div class="stack" style="gap:14px">${wfs.map(({ w }) => `<div data-action="go" data-href="#workflow/${w.id}" style="cursor:pointer"><div class="row between" style="margin-bottom:6px"><strong>${esc(w.name)}</strong><span class="muted small">${brandDot(w.brand)} ${esc(brandName(w.brand))}</span></div>${pipeline(w, true)}</div>`).join('')}</div>
-          </div>
-          <div class="card"><div class="ch"><h2>Ingresos y gastos · 6 meses</h2><div class="legend"><span><i style="background:#153D63"></i>Ingresos</span><span><i style="background:#C6A75E"></i>Gastos</span></div></div>
-            <div class="chart">${barChart(groups, [{ name: 'Ingresos', color: '#153D63' }, { name: 'Gastos', color: '#C6A75E' }], { fmt: money })}</div>
+          ${running.length ? `<div class="card"><div class="ch"><h2>En marcha</h2><a class="btn sm ghost" href="#workflows">Workflows</a></div><ul class="list">${running.map(({ w, chips }) => `<li><a class="grow" href="#workflow/${w.id}" style="text-decoration:none;color:inherit"><div class="t">${esc(w.name)}</div><div class="m">${chips.map(([s, n]) => `<span class="pill" style="background:color-mix(in srgb, ${s.color} 14%, transparent);color:var(--text)"><span class="dot" style="background:${s.color}"></span>${num(n)} ${esc(s.name.toLowerCase())}</span>`).join('')}</div></a><span class="muted">${icon('chev')}</span></li>`).join('')}</ul></div>` : ''}
+          <div class="grid stats">
+            <a class="card kpi mini" href="#tareas"><div class="l">Tareas abiertas</div><div class="v">${open.length}</div></a>
+            ${ui.brand !== 'ct' ? `<a class="card kpi mini" href="#correcciones"><div class="l">En tu revisión</div><div class="v">${num(tot.revision)}</div></a>` : ''}
+            ${al.last ? `<a class="card kpi mini" href="#metricas"><div class="l">Alumnos activos</div><div class="v">${num(al.last.value)}</div></a>` : ''}
+            ${hasMoney ? `<a class="card kpi mini" href="#contabilidad"><div class="l">Resultado del mes</div><div class="v ${f.net < 0 ? 'down' : ''}">${money(f.net)}</div></a>` : ''}
           </div>
         </div>
         <div class="stack">
-          <div class="card"><div class="ch"><h2>${icon('gcal')}Tu agenda</h2><a class="btn sm" href="#agenda">Abrir</a></div>
-            ${LIVE.mcp ? liveAgendaHtml(2) : `<iframe class="gcal" src="${esc(gcalEmbed('AGENDA'))}" height="340" loading="lazy" title="Google Calendar"></iframe>
-            <div class="small muted" style="margin-top:6px">Desde Google Calendar. Si no ves tus eventos, inicia sesión en Google en este navegador.</div>`}
+          <div class="card"><div class="ch"><h2>${icon('agenda')}Hoy y mañana</h2><a class="btn sm ghost" href="#agenda">Agenda</a></div>
+            ${LIVE.mcp ? liveAgendaHtml(2) : `<iframe class="gcal" src="${esc(gcalEmbed('AGENDA'))}" height="320" loading="lazy" title="Google Calendar"></iframe>`}
           </div>
-          ${LIVE.mcp && S.settings.mailEnabled ? `<div class="card"><div class="ch"><h2>${icon('inbox')}Correo pendiente</h2><span class="small muted">${esc(S.settings.mailAccount || '')}</span></div>${liveMailHtml(5)}</div>` : ''}
-          <div class="card"><div class="ch"><h2>${icon('inbox')}Actividad reciente</h2><span class="pill ${REMOTE || LIVE.mcp ? 'ok' : ''}">${REMOTE || LIVE.mcp ? 'En vivo' : 'Local'}</span></div>
-            ${S.activity.length ? `<ul class="list">${S.activity.slice(0, 6).map((a) => { const d = new Date(a.at); return `<li><span class="dot" style="background:${a.kind === 'bad' ? 'var(--bad)' : a.kind === 'ia' ? 'var(--ia)' : 'var(--ok)'}"></span><div class="grow"><div class="t" style="font-weight:600;font-size:13px">${esc(a.text)}</div><div class="m">${esc(a.source)} · ${fmtDate(iso(d))} ${pad(d.getHours())}:${pad(d.getMinutes())} hs</div></div></li>`; }).join('')}</ul>` : `<div class="empty">${REMOTE || LIVE.mcp ? 'Aquí aparece lo que hacen tus agentes, tu agenda y tus sesiones de Claude.' : 'En la versión publicada en Claude, aquí aparece en vivo lo que hacen tus agentes.'}</div>`}
-          </div>
-          <div class="card"><div class="ch"><h2>${icon('agentes')}Agentes de hoy</h2><a class="btn sm" href="#agentes">Ver</a></div>
-            <div class="timeline">${agToday.map((a) => `<div class="tl ${a.lastStatus}"><div class="row between"><span class="h">${esc(a.time)} hs <span class="muted small" style="font-weight:600">${esc(a.tz)}</span></span>${a.lastStatus === 'falla' ? '<span class="pill bad">Falla</span>' : ''}</div><div class="small">${esc(a.name)}</div></div>`).join('') || '<div class="empty">Sin agentes</div>'}</div>
-          </div>
-          <div class="card"><div class="ch"><h2>Próximas tareas</h2><a class="btn sm" href="#tareas">Todas</a></div>
-            ${upcoming.length ? '<ul class="list">' + upcoming.map(taskItem).join('') + '</ul>' : '<div class="empty">Sin tareas esta semana</div>'}
-          </div>
+          ${LIVE.mcp && S.settings.mailEnabled ? `<div class="card"><div class="ch"><h2>${icon('inbox')}Correo</h2><span class="small muted">${esc(S.settings.mailAccount || '')}</span></div>${liveMailHtml(4)}</div>` : ''}
+          ${week.length ? `<div class="card"><div class="ch"><h2>Esta semana</h2><a class="btn sm ghost" href="#tareas">Tareas</a></div><ul class="list">${week.map(taskItem).join('')}</ul></div>` : ''}
+          ${acts.length ? `<div class="card"><div class="ch"><h2>Lo último</h2>${LIVE.mcp ? '<span class="pill ok">En vivo</span>' : ''}</div><ul class="list compact">${acts.map((a) => { const d = new Date(a.at); return `<li><span class="dot" style="background:${a.kind === 'bad' ? 'var(--bad)' : a.kind === 'ia' ? 'var(--ia)' : 'var(--ok)'}"></span><div class="grow"><div class="t">${esc(cleanText(a.text, 110))}</div><div class="m">${esc(shortName(a.source))} · ${iso(d) === today() ? 'hoy' : fmtDate(iso(d))} ${hhmm(d)} hs</div></div></li>`; }).join('')}</ul></div>` : ''}
         </div>
       </div>`;
   };
@@ -1084,8 +1100,7 @@
           else toast('No se pudo guardar: ' + (e && e.code || 'error'));
         }
       }
-      setLiveFoot('ok');
-    } finally { LIVE.writing = false; }
+    } finally { LIVE.writing = false; setLiveFoot(); }
   }
   function setLiveFoot() { const el = $('#sideFoot'); if (el && S) el.innerHTML = footHtml(); }
 
@@ -1163,7 +1178,7 @@
       let a = S.agents.find((x) => x.triggerId === t.id);
       if (!a) { a = { id: 'ag-' + uid(), triggerId: t.id, wf: wfFor(t.name), brand: /carolina techera/i.test(t.name) ? 'ct' : 'pd', desc: '' }; S.agents.push(a); }
       const status = statusFrom(run, text);
-      const firstLine = String(text || '').split('\n').map((l) => l.replace(/[*#>]/g, '').trim()).filter(Boolean)[0] || '';
+      const firstLine = cleanText(text, 220);
       Object.assign(a, { name: t.name, time: cron.time, tz: cron.tz, rule: cron.rule, enabled: t.enabled !== false, nextRun: t.next_run_at || '', lastRun: run && run.fired_at ? iso(new Date(run.fired_at)) : a.lastRun || '', lastRunAt: run && run.fired_at || '', lastStatus: status, lastNote: firstLine.slice(0, 220), sessionId: run && run.session_id || '', link: sessionUrl(run && run.session_id) });
       if (!a.desc) a.desc = String((t.derived_state && t.derived_state.prompt) || '').split(/(?<=\.)\s/)[0].slice(0, 200);
       if (!run || !run.session_id || !text) return;
@@ -1330,6 +1345,9 @@
     $('#nav').innerHTML = NAV.map(([g, items]) => `<div class="grp">${g}</div>` + items.map(([k, l]) => { const c = counts[k]; return `<a href="#${k}" class="${active === k ? 'active' : ''}">${icon(k)}<span>${l}</span>${c && c[0] ? `<span class="count ${c[1] ? 'alert' : ''}">${c[0]}</span>` : ''}</a>`; }).join('')).join('');
     $('#brandFilter').innerHTML = [['all', 'Ambas']].concat(BRANDS.map((b) => [b.id, b.short])).map(([id, n]) => `<button class="${ui.brand === id ? 'active' : ''}" data-action="brand" data-v="${id}">${id === 'all' ? '' : brandDot(id)}${esc(n)}</button>`).join('');
     $('#themeBtn').innerHTML = icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon');
+    $('#brandFilterSide').innerHTML = $('#brandFilter').innerHTML;
+    const tabs = [['inicio', 'Hoy', 'inicio'], ['agenda', 'Agenda', 'agenda'], ['correcciones', 'Correcciones', 'correcciones'], ['tareas', 'Tareas', 'tareas']];
+    $('#tabbar').innerHTML = tabs.map(([k, l, ic]) => { const c = counts[k]; return `<a href="#${k}" class="${active === k ? 'active' : ''}">${icon(ic)}<span>${l}</span>${c && c[0] ? `<b class="${c[1] ? 'alert' : ''}">${c[0] > 99 ? '99+' : c[0]}</b>` : ''}</a>`; }).join('') + `<button data-action="menu">${icon('workflows')}<span>Más</span></button>`;
     $('#sideFoot').innerHTML = footHtml();
     $('#main').innerHTML = (VIEWS[ui.route] || VIEWS.inicio)();
     document.title = `${ui.route === 'workflow' ? (wfById(ui.param) || {}).name || 'Workflow' : ROUTE_NAMES[ui.route] || 'Inicio'} · Panel Central`;
@@ -1515,7 +1533,17 @@
     render();
   }
   let toastT;
-  function toast(msg) { const el = $('#toast'); el.textContent = msg; el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { el.hidden = true; }, 2600); }
+  let undoFn = null;
+  function toast(msg, undo) {
+    const el = $('#toast'); undoFn = typeof undo === 'function' ? undo : null;
+    el.innerHTML = `<span>${esc(msg)}</span>${undoFn ? '<button class="toast-undo" data-action="undo">Deshacer</button>' : ''}`;
+    el.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { el.hidden = true; undoFn = null; }, undoFn ? 6000 : 2600);
+  }
+  function withUndo(keys, fn, msg) {
+    const snap = {}; keys.forEach((k) => { snap[k] = JSON.stringify(S[k]); });
+    fn(); save(); render();
+    toast(msg, () => { keys.forEach((k) => { S[k] = JSON.parse(snap[k]); }); save(); render(); toast('Cambio deshecho'); });
+  }
 
   /* ================= Eventos ================= */
   document.addEventListener('click', (e) => {
@@ -1534,19 +1562,25 @@
       case 'set': ui[el.dataset.k] = el.dataset.v; saveUi(); render(); break;
       case 'new': openForm(el.dataset.entity, null, Object.assign({}, el.dataset.project ? { project: el.dataset.project } : {}, el.dataset.brand ? { brand: el.dataset.brand } : {}, el.dataset.wf ? { wf: el.dataset.wf } : {})); break;
       case 'edit': e.stopPropagation(); openForm(el.dataset.entity, el.dataset.id); break;
-      case 'advance': e.stopPropagation(); advance(el.dataset.id); break;
+      case 'advance': { e.stopPropagation(); const snap = { items: JSON.stringify(S.items), tasks: JSON.stringify(S.tasks), posts: JSON.stringify(S.posts) }; advance(el.dataset.id); toast('Avanzó a la etapa siguiente', () => { Object.keys(snap).forEach((k) => { S[k] = JSON.parse(snap[k]); }); save(); render(); }); break; }
       case 'del': {
         const ent = el.dataset.entity; const o = S[ent].find((x) => x.id === el.dataset.id);
-        if (o && confirm('¿Eliminar este registro? Esta acción no se puede deshacer.')) {
-          S[ent] = S[ent].filter((x) => x.id !== o.id);
-          if (ent === 'projects') ['tasks', 'transactions', 'contacts'].forEach((k) => S[k].forEach((x) => { if (x.project === o.id) x.project = ''; }));
-          if (ent === 'workflows') { S.items = S.items.filter((i) => i.wf !== o.id); if (ui.route === 'workflow') location.hash = '#workflows'; }
-          save(); closeDrawer(); render(); toast('Eliminado');
+        if (o && (ent !== 'workflows' || confirm('¿Eliminar este workflow y todos sus ítems?'))) {
+          closeDrawer();
+          withUndo([ent, 'tasks', 'transactions', 'contacts', 'items'].filter((v, i, a) => a.indexOf(v) === i), () => {
+            S[ent] = S[ent].filter((x) => x.id !== o.id);
+            if (ent === 'projects') ['tasks', 'transactions', 'contacts'].forEach((k) => S[k].forEach((x) => { if (x.project === o.id) x.project = ''; }));
+            if (ent === 'workflows') { S.items = S.items.filter((i) => i.wf !== o.id); if (ui.route === 'workflow') location.hash = '#workflows'; }
+          }, 'Eliminado');
         }
         break;
       }
       case 'close': closeDrawer(); break;
-      case 'toggle-task': { const t = S.tasks.find((x) => x.id === el.dataset.id); if (t) setTaskStatus(t.id, t.status === 'hecha' ? 'pendiente' : 'hecha'); break; }
+      case 'toggle-task': { const t = S.tasks.find((x) => x.id === el.dataset.id); if (t) { const done = t.status !== 'hecha'; withUndo(['tasks'], () => { const was = t.status; t.status = done ? 'hecha' : 'pendiente'; if (was !== 'hecha' && done) spawnNext(t); }, done ? 'Tarea completada' : 'Tarea reabierta'); } break; }
+      case 'snooze-task': { const t = S.tasks.find((x) => x.id === el.dataset.id); if (t) withUndo(['tasks'], () => { t.due = iso(addDays(new Date(), 1)); }, 'Pasada a mañana'); break; }
+      case 'followup-done': { const c = S.contacts.find((x) => x.id === el.dataset.id); if (c) withUndo(['contacts'], () => { c.followup = ''; }, 'Seguimiento hecho'); break; }
+      case 'dismiss': { const k = el.dataset.key; withUndo(['meta'], () => { const d = S.meta.dismissed = S.meta.dismissed || {}; Object.keys(d).forEach((x) => { if (d[x] <= today()) delete d[x]; }); d[k] = iso(addDays(new Date(), 1)); }, 'Oculto hasta mañana'); break; }
+      case 'undo': if (undoFn) { const f = undoFn; undoFn = null; f(); } break;
       case 'todo': { const r = latestReport(); const t = r && r.todos[Number(el.dataset.i)]; if (t) { t.done = !t.done; save(); render(); } break; }
       case 'copy': { const txt = el.dataset.text; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => toast('Copiado: ' + txt), () => toast(txt)); break; }
       case 'report': openReportDrawer(); break;
