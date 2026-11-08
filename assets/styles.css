@@ -365,3 +365,14 @@ details.raw pre{white-space:pre-wrap;font-size:12px;background:var(--surface-2);
   .tabbar b.alert{background:var(--bad);color:#fff}
   .toast{bottom:84px;max-width:calc(100vw - 24px)}
 }
+
+/* ---------- CRM ---------- */
+.avatar{width:52px;height:52px;border-radius:50%;display:grid;place-items:center;color:#fff;font-family:Montserrat;font-weight:700;font-size:18px;flex-shrink:0;box-shadow:inset 0 -3px 0 rgba(0,0,0,.15)}
+.avatar.sm{width:32px;height:32px;font-size:12px}
+.person-head{display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap}
+.person-acts{margin-left:auto;align-self:center}
+.crm-search{flex:1;min-width:200px;max-width:340px;padding:7px 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);font-size:13px}
+tr.rowlink{cursor:pointer}
+.tl-person .tl::before{border-color:var(--c, var(--line-2))}
+.tl-person .tl{padding-bottom:16px}
+@media (max-width:860px){ .person-acts{margin-left:0;width:100%} .crm-search{max-width:none;flex-basis:100%} }

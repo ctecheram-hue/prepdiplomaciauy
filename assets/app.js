@@ -50,6 +50,9 @@
   const METRIC_KEYS = [['ig_seguidores', 'Seguidores en Instagram'], ['li_seguidores', 'Seguidores en LinkedIn'], ['web_visitas', 'Visitas a la web'], ['news_suscriptores', 'Suscriptores (newsletter y Substack)'], ['alumnos', 'Alumnos activos'], ['consultas', 'Consultas recibidas'], ['conversion', 'Conversión de consultas (%)'], ['clientes', 'Clientes de consultoría']];
   const metricLabel = (k) => (METRIC_KEYS.find((m) => m[0] === k) || [k, k])[1];
   const CONTACT_TYPES = ['Alumno/a', 'Interesado/a', 'Cliente', 'Aliado/a', 'Docente', 'Proveedor', 'Otro'];
+  const CRM_STAGES = [['nuevo', 'Nuevo', '#94A3B8'], ['contactado', 'Contactado', '#5B8FC7'], ['reunion', 'Reunión', '#6B4FBB'], ['propuesta', 'Propuesta', '#C6A75E'], ['activo', 'Alumno o cliente activo', '#1F8A5B'], ['inactivo', 'Inactivo', '#64768C'], ['perdido', 'Perdido', '#C2413A']];
+  const INTER_TYPES = [['nota', 'Nota'], ['llamada', 'Llamada'], ['reunion', 'Reunión'], ['correo', 'Correo'], ['whatsapp', 'WhatsApp'], ['pago', 'Pago'], ['clase', 'Clase o devolución'], ['otro', 'Otro']];
+  const SOURCES = ['Instagram', 'Web', 'Recomendación', 'Google Calendar', 'Calendly', 'LinkedIn', 'Correo', 'Evento', 'Importación', 'Otro'];
   const OWNERS = ['Carolina', 'Agente IA', 'Colaborador/a'];
   const label = (arr, v) => (arr.find((a) => a[0] === v) || [v, v])[1];
 
@@ -118,6 +121,7 @@
   const brandOpts = () => BRANDS.map((b) => [b.id, b.name]);
   const brandOptsAll = () => [['all', 'Ambas marcas']].concat(brandOpts());
   const projectOpts = () => [['', 'Sin proyecto']].concat(S.projects.map((p) => [p.id, p.name]));
+  const contactOpts = () => [['', 'Sin persona']].concat(S.contacts.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map((c) => [c.id, c.name]));
   const wfOpts = () => S.workflows.map((w) => [w.id, w.name]);
   const stageOpts = (wfId) => ((S.workflows.find((w) => w.id === wfId) || S.workflows[0] || { stages: [] }).stages).map((s) => [s.id, s.name]);
   const SCHEMAS = {
@@ -125,6 +129,7 @@
       { k: 'title', l: 'Título', t: 'text', req: true, full: true },
       { k: 'brand', l: 'Marca', t: 'select', o: brandOpts },
       { k: 'project', l: 'Proyecto', t: 'select', o: projectOpts },
+      { k: 'contact', l: 'Persona', t: 'select', o: () => contactOpts() },
       { k: 'due', l: 'Fecha', t: 'date' }, { k: 'time', l: 'Hora', t: 'time' },
       { k: 'priority', l: 'Prioridad', t: 'select', o: () => [['alta', 'Alta'], ['media', 'Media'], ['baja', 'Baja']] },
       { k: 'status', l: 'Estado', t: 'select', o: () => TASK_STATUS },
@@ -139,6 +144,7 @@
       { k: 'owner', l: 'Responsable', t: 'select', o: () => OWNERS.map((o) => [o, o]) },
       { k: 'due', l: 'Fecha límite', t: 'date' },
       { k: 'count', l: 'Cantidad (si agrupa varias)', t: 'number', min: 1 },
+      { k: 'contact', l: 'Persona', t: 'select', o: () => contactOpts() },
       { k: 'link', l: 'Enlace (Moodle, Drive, Canva…)', t: 'url', full: true },
       { k: 'notes', l: 'Notas', t: 'textarea', full: true },
     ], defaults: () => ({ wf: (ui.route === 'workflow' && ui.param) || S.workflows[0]?.id, brand: defBrand(), owner: 'Carolina' }) },
@@ -181,6 +187,7 @@
       { k: 'amount', l: 'Importe', t: 'number', req: true, step: '0.01' },
       { k: 'currency', l: 'Moneda', t: 'select', o: () => [['UYU', 'Pesos uruguayos'], ['USD', 'Dólares'], ['EUR', 'Euros']] },
       { k: 'project', l: 'Proyecto', t: 'select', o: projectOpts },
+      { k: 'contact', l: 'Persona', t: 'select', o: () => contactOpts() },
       { k: 'status', l: 'Estado', t: 'select', o: () => [['cobrado', 'Cobrado o pagado'], ['pendiente', 'Pendiente']] },
       { k: 'notes', l: 'Notas (factura, medio de pago…)', t: 'textarea', full: true },
     ], defaults: () => ({ type: 'ingreso', date: today(), brand: defBrand(), currency: 'UYU', status: 'cobrado', category: INCOME_CATS[0] }) },
@@ -199,15 +206,27 @@
       { k: 'value', l: 'Valor', t: 'number', req: true, step: 'any' },
       { k: 'notes', l: 'Nota', t: 'text', full: true },
     ], defaults: () => ({ key: ui.metricKey || 'ig_seguidores', brand: defBrand(), date: today() }) },
-    contacts: { title: 'Contacto', fields: [
+    contacts: { title: 'Persona', fields: [
       { k: 'name', l: 'Nombre', t: 'text', req: true, full: true },
       { k: 'type', l: 'Tipo', t: 'select', o: () => CONTACT_TYPES.map((c) => [c, c]) },
+      { k: 'stage', l: 'Etapa', t: 'select', o: () => CRM_STAGES },
+      { k: 'email', l: 'Correo', t: 'email' }, { k: 'phone', l: 'Teléfono o WhatsApp', t: 'text' },
       { k: 'brand', l: 'Marca', t: 'select', o: brandOpts },
-      { k: 'email', l: 'Correo', t: 'email' }, { k: 'phone', l: 'Teléfono', t: 'text' },
+      { k: 'source', l: 'Origen', t: 'select', o: () => [['', 'Sin dato']].concat(SOURCES.map((x) => [x, x])) },
+      { k: 'country', l: 'País', t: 'text' }, { k: 'tags', l: 'Etiquetas (separadas por comas)', t: 'text' },
+      { k: 'followup', l: 'Próximo seguimiento', t: 'date' }, { k: 'value', l: 'Valor estimado (UYU)', t: 'number' },
+      { k: 'nextAction', l: 'Próxima acción', t: 'text', full: true },
       { k: 'project', l: 'Proyecto', t: 'select', o: projectOpts },
-      { k: 'followup', l: 'Próximo seguimiento', t: 'date' },
       { k: 'notes', l: 'Notas', t: 'textarea', full: true },
-    ], defaults: () => ({ type: 'Interesado/a', brand: defBrand() }) },
+    ], defaults: () => ({ type: 'Interesado/a', stage: 'nuevo', brand: defBrand(), created: today() }) },
+    interactions: { title: 'Contacto registrado', fields: [
+      { k: 'contact', l: 'Persona', t: 'select', o: () => contactOpts(), req: true, full: true },
+      { k: 'type', l: 'Tipo', t: 'select', o: () => INTER_TYPES },
+      { k: 'date', l: 'Fecha', t: 'date', req: true },
+      { k: 'summary', l: 'Qué pasó', t: 'textarea', req: true, full: true },
+      { k: 'nextFollowup', l: 'Próximo seguimiento', t: 'date' },
+      { k: 'nextAction', l: 'Próxima acción', t: 'text' },
+    ], defaults: () => ({ type: 'llamada', date: today() }) },
     resources: { title: 'Recurso o enlace', fields: [
       { k: 'name', l: 'Nombre', t: 'text', req: true, full: true },
       { k: 'url', l: 'Enlace', t: 'text', req: true, full: true },
@@ -322,6 +341,8 @@
     }
     Object.keys(SCHEMAS).forEach((k) => { if (!Array.isArray(out[k])) out[k] = []; });
     if (!Array.isArray(out.activity)) out.activity = [];
+    if (!Array.isArray(out.interactions)) out.interactions = [];
+    out.contacts.forEach((c) => { if (!c.stage) c.stage = /alumno|cliente/i.test(c.type || '') ? 'activo' : 'nuevo'; });
     out.meta = Object.assign({ lastEventId: 0 }, out.meta || {});
     out.version = 2;
     return out;
@@ -599,12 +620,14 @@
     search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>', inbox: '<path d="M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6a1 1 0 01-1 1H4a1 1 0 01-1-1v-6z"/>',
     gcal: '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4M9 15h2v2H9z"/>', user: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
   };
+  P.personas = P.contactos; P.seguimientos = P.clock;
   const icon = (k, cls = 'i') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[k] || ''}</svg>`;
 
   const NAV = [
     ['General', [['inicio', 'Inicio'], ['agenda', 'Agenda'], ['tareas', 'Tareas']]],
     ['Workflows', [['workflows', 'Workflows'], ['correcciones', 'Correcciones'], ['agentes', 'Agentes IA']]],
-    ['Negocio', [['proyectos', 'Proyectos'], ['marketing', 'Marketing'], ['contabilidad', 'Contabilidad'], ['metricas', 'Métricas'], ['contactos', 'Contactos']]],
+    ['CRM', [['personas', 'Personas'], ['seguimientos', 'Seguimientos']]],
+    ['Negocio', [['proyectos', 'Proyectos'], ['marketing', 'Marketing'], ['contabilidad', 'Contabilidad'], ['metricas', 'Métricas']]],
     ['Sistema', [['recursos', 'Recursos'], ['ajustes', 'Ajustes y respaldo']]],
   ];
   const ROUTE_NAMES = Object.fromEntries(NAV.flatMap((g) => g[1]));
@@ -751,7 +774,10 @@
     }
     if (S.settings.mailEnabled && LIVE.mail.length) push({ key: 'mail:' + LIVE.mail[0].id, level: 'info', ic: 'inbox', title: `${plural(LIVE.mail.length, 'correo sin leer', 'correos sin leer')}`, sub: LIVE.mail.slice(0, 2).map((m) => m.subject).join(' · '), dismiss: true, actions: [{ label: 'Abrir Gmail', href: `https://mail.google.com/mail/?authuser=${encodeURIComponent(S.settings.mailAccount || '')}#inbox`, primary: true }] });
     Object.entries(LIVE.src).filter(([, v]) => v.state === 'blocked' || v.state === 'error').forEach(([k, v]) => push({ key: 'conn:' + k + ':' + (v.code || ''), level: v.state === 'blocked' ? 'warn' : 'bad', ic: 'ajustes', title: v.state === 'blocked' ? 'Falta un permiso para conectar' : 'Una conexión necesita atención', sub: v.msg, dismiss: true, actions: v.state === 'blocked' ? [{ label: 'Permitir', action: 'live-refresh', primary: true }] : [{ label: 'Ver conexiones', href: '#ajustes', primary: true }] }));
-    byBrand(S.contacts).filter((c) => c.followup && c.followup <= td).slice(0, 2).forEach((c) => push({ key: 'fu:' + c.id + ':' + c.followup, level: 'info', ic: 'contactos', title: `Hacer seguimiento a ${c.name}`, sub: `${c.type}${c.notes ? ' · ' + cleanText(c.notes, 90) : ''}`, dismiss: true, actions: [c.email ? { label: 'Escribir', href: `mailto:${c.email}`, primary: true } : { label: 'Ver contacto', action: 'edit', entity: 'contacts', id: c.id, primary: true }, { label: 'Listo', action: 'followup-done', id: c.id }] }));
+    const fus = byBrand(S.contacts).filter((c) => c.followup && c.followup <= td).sort((a, b) => a.followup.localeCompare(b.followup));
+    fus.slice(0, 3).forEach((c) => push({ key: 'fu:' + c.id + ':' + c.followup, level: c.followup < td ? 'warn' : 'info', ic: 'contactos', title: `Seguimiento: ${c.name}`, sub: `${c.nextAction || c.type}${c.followup < td ? ` · desde el ${fmtDate(c.followup)}` : ''}`,
+      actions: [{ label: 'Registrar contacto', action: 'log', id: c.id, primary: true }, c.email ? { label: 'Correo', href: `mailto:${c.email}` } : null, waLink(c.phone) ? { label: 'WhatsApp', href: waLink(c.phone) } : null, { label: 'Mañana', action: 'fu-snooze', id: c.id }, { label: 'Ficha', href: '#persona/' + c.id }].filter(Boolean) }));
+    if (fus.length > 3) push({ key: 'fu-more:' + td + ':' + fus.length, level: 'info', ic: 'seguimientos', title: `${fus.length - 3} seguimientos más para hoy`, sub: fus.slice(3, 6).map((c) => c.name).join(' · '), dismiss: true, actions: [{ label: 'Ver seguimientos', href: '#seguimientos', primary: true }] });
     const f = finance(ym(td)); if (f.pend > 0) push({ key: 'cobro:' + ym(td) + ':' + Math.round(f.pend), level: 'info', ic: 'contabilidad', title: `${money(f.pend)} por cobrar este mes`, sub: 'Ingresos marcados como pendientes.', dismiss: true, actions: [{ label: 'Ver movimientos', href: '#contabilidad', primary: true }] });
     const order = { bad: 0, ia: 1, warn: 2, info: 3 };
     return out.map((o, i) => Object.assign(o, { i })).sort((a, b) => order[a.level] - order[b.level] || a.i - b.i);
@@ -1041,6 +1067,159 @@
       </tbody></table></div>`;
   };
 
+  /* ================= CRM: personas, seguimientos y embudo ================= */
+  const initials = (n) => String(n || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+  const stageOf = (c) => CRM_STAGES.find((s) => s[0] === c.stage) || CRM_STAGES[0];
+  const stagePill = (c) => { const s = stageOf(c); return `<span class="pill" style="background:color-mix(in srgb, ${s[2]} 15%, transparent);color:var(--text)"><span class="dot" style="background:${s[2]}"></span>${esc(s[1])}</span>`; };
+  const waLink = (phone) => { const d = String(phone || '').replace(/[^\d]/g, ''); return d.length >= 8 ? `https://wa.me/${d}` : ''; };
+  const contactName = (id) => (S.contacts.find((c) => c.id === id) || {}).name || '';
+  const lastTouch = (c) => { const ds = S.interactions.filter((i) => i.contact === c.id).map((i) => i.date).sort(); return ds[ds.length - 1] || c.lastContact || ''; };
+  function fuPill(c) {
+    if (!c.followup) return '<span class="small muted">Sin seguimiento</span>';
+    const td = today(); const cls = c.followup < td ? 'solid-bad' : c.followup === td ? 'warn' : 'info';
+    return `<span class="pill ${cls}">${c.followup === td ? 'Hoy' : fmtDate(c.followup)}</span>`;
+  }
+  function crmFiltered() {
+    const q = String(ui.crmQ || '').toLowerCase().trim();
+    return byBrand(S.contacts).filter((c) => (!ui.crmType || c.type === ui.crmType) && (!ui.crmLate || (c.followup && c.followup <= today())) &&
+      (!q || [c.name, c.email, c.phone, c.tags, c.notes, c.nextAction, c.country, c.source].some((v) => String(v || '').toLowerCase().includes(q))));
+  }
+
+  VIEWS.personas = () => {
+    const all = byBrand(S.contacts); const list = crmFiltered();
+    const late = all.filter((c) => c.followup && c.followup <= today()).length;
+    const counts = {}; all.forEach((c) => { counts[c.type] = (counts[c.type] || 0) + 1; });
+    const view = ui.crmView || 'lista';
+    const filters = `<div class="filters"><input id="crmSearch" class="crm-search" type="search" placeholder="Buscar por nombre, correo, etiqueta…" value="${esc(ui.crmQ || '')}" aria-label="Buscar personas">
+      <button class="chip ${!ui.crmType ? 'active' : ''}" data-action="set" data-k="crmType" data-v="">Todas · ${all.length}</button>
+      ${CONTACT_TYPES.filter((t) => counts[t]).map((t) => `<button class="chip ${ui.crmType === t ? 'active' : ''}" data-action="set" data-k="crmType" data-v="${esc(t)}">${esc(t)} · ${counts[t]}</button>`).join('')}
+      <button class="chip ${ui.crmLate ? 'active' : ''}" data-action="set" data-k="crmLate" data-v="${ui.crmLate ? '' : '1'}">Seguimiento pendiente · ${late}</button></div>`;
+    let body;
+    if (view === 'embudo') {
+      body = board('contacts', CRM_STAGES.map(([id, name, color], i) => ({ id, name, color, next: CRM_STAGES[i + 1] ? { name: CRM_STAGES[i + 1][1] } : null, items: list.filter((c) => (c.stage || 'nuevo') === id) })),
+        (c) => `<div class="t"><a href="#persona/${c.id}" style="color:inherit;text-decoration:none">${esc(c.name)}</a></div><div class="meta"><span>${esc(c.type)}</span>${c.followup ? fuPill(c) : ''}${c.value ? `<span>${money(c.value)}</span>` : ''}</div>${c.nextAction ? `<div class="meta" style="margin-top:4px">${esc(c.nextAction)}</div>` : ''}`);
+    } else {
+      body = `<div class="card pad0 tw"><table><thead><tr><th>Persona</th><th>Tipo</th><th>Etapa</th><th>Próximo seguimiento</th><th class="hide-m">Último contacto</th><th class="hide-m">Etiquetas</th><th></th></tr></thead><tbody>
+        ${list.slice().sort((a, b) => (a.followup || '9999').localeCompare(b.followup || '9999') || a.name.localeCompare(b.name)).map((c) => `<tr class="rowlink" data-action="go" data-href="#persona/${c.id}">
+          <td><div class="row" style="gap:10px;flex-wrap:nowrap"><span class="avatar sm" style="background:${brandColor(c.brand)}">${esc(initials(c.name))}</span><div style="min-width:0"><strong>${esc(c.name)}</strong>${c.email ? `<div class="small muted">${esc(c.email)}</div>` : ''}</div></div></td>
+          <td>${esc(c.type)}</td><td>${stagePill(c)}</td><td>${fuPill(c)}${c.nextAction ? `<div class="small muted">${esc(c.nextAction)}</div>` : ''}</td>
+          <td class="hide-m">${lastTouch(c) ? fmtDate(lastTouch(c)) : '<span class="muted">–</span>'}</td>
+          <td class="hide-m">${String(c.tags || '').split(',').map((t) => t.trim()).filter(Boolean).map((t) => `<span class="pill">${esc(t)}</span>`).join(' ')}</td>
+          <td class="act"><button class="btn sm" data-action="log" data-id="${c.id}">Registrar</button></td></tr>`).join('') || `<tr><td colspan="7" class="empty">${all.length ? 'Nadie coincide con el filtro' : 'Todavía no hay personas. Las sesiones de tu agenda se agregan solas, o puedes importar una lista.'}</td></tr>`}
+        </tbody></table></div>`;
+    }
+    return head('Personas', 'Alumnos, interesados, clientes y aliados, con toda su historia en una ficha. Las sesiones de consulta y de devolución de tu agenda se agregan solas.',
+      `<div class="seg"><button class="${view === 'lista' ? 'active' : ''}" data-action="set" data-k="crmView" data-v="lista">Lista</button><button class="${view === 'embudo' ? 'active' : ''}" data-action="set" data-k="crmView" data-v="embudo">Embudo</button></div>
+       <button class="btn" data-action="crm-import">Importar</button><button class="btn primary" data-action="new" data-entity="contacts">${icon('plus')}Persona</button>`, 'CRM') + filters + body;
+  };
+  VIEWS.contactos = VIEWS.personas;
+
+  function timelineFor(c) {
+    const ev = [];
+    const typeLabel = (t) => label(INTER_TYPES, t);
+    S.interactions.filter((i) => i.contact === c.id).forEach((i) => ev.push({ date: i.date, time: i.time || '', ic: 'contactos', kind: typeLabel(i.type), text: i.summary, edit: ['interactions', i.id], color: 'var(--accent)' }));
+    S.tasks.filter((t) => t.contact === c.id).forEach((t) => ev.push({ date: t.due || '', ic: 'tareas', kind: t.status === 'hecha' ? 'Tarea hecha' : 'Tarea', text: t.title, edit: ['tasks', t.id], color: t.status === 'hecha' ? 'var(--ok)' : 'var(--warn)', future: t.status !== 'hecha' }));
+    S.items.filter((i) => i.contact === c.id).forEach((i) => { const w = wfById(i.wf); const st = w && w.stages.find((s) => s.id === i.stage); ev.push({ date: i.due || i.updated || '', ic: 'workflows', kind: w ? w.name : 'Workflow', text: `${i.title}${st ? ' · ' + st.name : ''}`, edit: ['items', i.id], color: 'var(--ia)' }); });
+    S.transactions.filter((t) => t.contact === c.id).forEach((t) => ev.push({ date: t.date, ic: 'contabilidad', kind: t.type === 'ingreso' ? (t.status === 'pendiente' ? 'Pago pendiente' : 'Pago') : 'Gasto', text: `${t.desc} · ${t.currency === 'EUR' ? '€ ' + num(t.amount) : money(t.amount, t.currency)}`, edit: ['transactions', t.id], color: 'var(--ok)' }));
+    const em = String(c.email || '').toLowerCase();
+    if (em) {
+      LIVE.events.filter((e) => (e.attendees || []).some((a) => String(a.email || '').toLowerCase() === em)).forEach((e) => { const d = evStart(e); ev.push({ date: iso(d), time: hhmm(d), ic: 'agenda', kind: d > new Date() ? 'Próxima reunión' : 'Reunión', text: e.summary || '', href: e.conferenceUrl || e.htmlLink, color: 'var(--gold-d)', future: d > new Date(), live: true }); });
+      LIVE.mail.filter((m) => String(m.fromEmail || '').toLowerCase() === em).forEach((m) => ev.push({ date: m.date ? iso(new Date(m.date)) : '', ic: 'inbox', kind: 'Correo sin leer', text: m.subject, href: m.url, color: 'var(--info)', live: true }));
+    }
+    const seen = new Set();
+    return ev.filter((x) => { const k = x.kind + x.date + x.text; if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
+  }
+
+  VIEWS.persona = () => {
+    const c = S.contacts.find((x) => x.id === ui.param);
+    if (!c) return head('Persona no encontrada', '<a href="#personas">Volver a Personas</a>');
+    const tl = timelineFor(c); const wa = waLink(c.phone);
+    const paid = S.transactions.filter((t) => t.contact === c.id && t.type === 'ingreso' && t.status !== 'pendiente').reduce((a, t) => a + toUYU(t), 0);
+    const pend = S.transactions.filter((t) => t.contact === c.id && t.type === 'ingreso' && t.status === 'pendiente').reduce((a, t) => a + toUYU(t), 0);
+    const openT = S.tasks.filter((t) => t.contact === c.id && t.status !== 'hecha').length;
+    const tags = String(c.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
+    const agendaUrl = (() => { const u = new URL(gcalTemplate({ title: `Reunión con ${c.name}`, date: today() })); if (c.email) u.searchParams.set('add', c.email); return u.toString(); })();
+    return `<div class="small" style="margin-bottom:8px"><a href="#personas">Personas</a> <span class="muted">/ ${esc(c.name)}</span></div>
+      <div class="card person-head">
+        <span class="avatar" style="background:${brandColor(c.brand)}">${esc(initials(c.name))}</span>
+        <div class="grow" style="min-width:0"><h1 style="font-size:22px">${esc(c.name)}</h1>
+          <div class="row" style="margin-top:6px"><span class="pill">${esc(c.type)}</span>${stagePill(c)}<span class="small muted">${brandDot(c.brand)} ${esc(brandName(c.brand))}</span>${tags.map((t) => `<span class="pill">${esc(t)}</span>`).join('')}</div>
+          <div class="row small muted" style="margin-top:8px;gap:14px">${c.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : ''}${c.phone ? `<span>${esc(c.phone)}</span>` : ''}${c.country ? `<span>${esc(c.country)}</span>` : ''}${c.source ? `<span>Origen: ${esc(c.source)}</span>` : ''}${c.created ? `<span>Desde ${fmtDate(c.created)}</span>` : ''}</div>
+        </div>
+        <div class="row person-acts"><button class="btn primary" data-action="log" data-id="${c.id}">${icon('plus')}Registrar contacto</button>${c.email ? `<a class="btn" href="mailto:${esc(c.email)}">Correo</a>` : ''}${wa ? `<a class="btn" href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}<a class="btn" href="${esc(agendaUrl)}" target="_blank" rel="noopener">${icon('gcal')}Agendar</a><button class="btn" data-action="new" data-entity="tasks" data-contact="${c.id}" data-brand="${c.brand}">Tarea</button><button class="iconbtn" data-action="edit" data-entity="contacts" data-id="${c.id}" aria-label="Editar">${icon('edit')}</button></div>
+      </div>
+      <div class="grid g-main" style="margin-top:16px">
+        <div class="card"><div class="ch"><h2>Historia</h2><span class="small muted">${plural(tl.length, 'registro')}</span></div>
+          ${tl.length ? `<div class="timeline tl-person">${tl.map((x) => `<div class="tl" style="--c:${x.color}"><div class="row between" style="gap:8px"><span class="small" style="font-weight:700;color:${x.color}">${esc(x.kind)}${x.future ? ' · próximo' : ''}</span><span class="small muted">${x.date ? (x.date === today() ? 'Hoy' : fmtDate(x.date)) : ''}${x.time ? ' · ' + esc(x.time) + ' hs' : ''}${x.edit ? ` <button class="iconbtn" data-action="edit" data-entity="${x.edit[0]}" data-id="${x.edit[1]}" aria-label="Editar">${icon('edit')}</button>` : ''}${x.href ? ` <a class="iconbtn" href="${esc(x.href)}" target="_blank" rel="noopener" aria-label="Abrir">${icon('ext')}</a>` : ''}</span></div><div>${esc(x.text || '')}</div></div>`).join('')}</div>` : '<div class="empty">Sin historia todavía. Registra el primer contacto o agenda una reunión.</div>'}
+        </div>
+        <div class="stack">
+          <div class="card"><h2 style="margin-bottom:10px">Próximo seguimiento</h2>
+            ${c.followup ? `<div class="row between"><div>${fuPill(c)}<div style="margin-top:6px">${esc(c.nextAction || 'Sin acción definida')}</div></div></div>
+              <div class="facts"><button class="btn sm primary" data-action="log" data-id="${c.id}">Hecho</button><button class="btn sm" data-action="fu-snooze" data-id="${c.id}" data-days="1">Mañana</button><button class="btn sm" data-action="fu-snooze" data-id="${c.id}" data-days="7">En una semana</button></div>`
+              : `<div class="empty" style="padding:10px">Sin seguimiento agendado.<div class="facts" style="justify-content:center"><button class="btn sm" data-action="fu-snooze" data-id="${c.id}" data-days="3">En 3 días</button><button class="btn sm" data-action="fu-snooze" data-id="${c.id}" data-days="7">En una semana</button></div></div>`}
+          </div>
+          <div class="card"><h2 style="margin-bottom:6px">Resumen</h2><ul class="list">
+            <li><span class="grow">Pagado</span><strong>${money(paid)}</strong></li>
+            ${pend ? `<li><span class="grow">Pendiente de cobro</span><strong class="down">${money(pend)}</strong></li>` : ''}
+            ${c.value ? `<li><span class="grow">Valor estimado</span><strong>${money(c.value)}</strong></li>` : ''}
+            <li><span class="grow">Tareas abiertas</span><strong>${openT}</strong></li>
+            <li><span class="grow">Último contacto</span><strong>${lastTouch(c) ? fmtDate(lastTouch(c)) : '–'}</strong></li>
+            ${c.project ? `<li><span class="grow">Proyecto</span><strong style="text-align:right">${esc(projName(c.project))}</strong></li>` : ''}
+          </ul><div class="facts"><button class="btn sm" data-action="new" data-entity="transactions" data-contact="${c.id}" data-brand="${c.brand}">Registrar pago</button><button class="btn sm" data-action="new" data-entity="items" data-contact="${c.id}" data-brand="${c.brand}">Agregar a un workflow</button></div></div>
+          ${c.notes ? `<div class="card"><h2 style="margin-bottom:6px">Notas</h2><p style="margin:0;white-space:pre-wrap">${esc(c.notes)}</p></div>` : ''}
+        </div>
+      </div>`;
+  };
+
+  VIEWS.seguimientos = () => {
+    const td = today(); const wk = iso(addDays(new Date(), 7));
+    const all = byBrand(S.contacts);
+    const withFu = all.filter((c) => c.followup).sort((a, b) => a.followup.localeCompare(b.followup));
+    const groups = [['Vencidos', withFu.filter((c) => c.followup < td), 'bad'], ['Hoy', withFu.filter((c) => c.followup === td), 'warn'], ['Próximos 7 días', withFu.filter((c) => c.followup > td && c.followup <= wk), 'info'], ['Más adelante', withFu.filter((c) => c.followup > wk), '']];
+    const without = all.filter((c) => !c.followup && !['perdido', 'inactivo'].includes(c.stage || 'nuevo') && c.type !== 'Proveedor');
+    const row = (c) => { const wa = waLink(c.phone); return `<li><span class="avatar sm" style="background:${brandColor(c.brand)}">${esc(initials(c.name))}</span><div class="grow"><a class="t" href="#persona/${c.id}" style="color:inherit;text-decoration:none">${esc(c.name)}</a><div class="m"><span>${esc(c.type)}</span>${stagePill(c)}${fuPill(c)}</div>${c.nextAction ? `<div class="small" style="margin-top:3px">${esc(c.nextAction)}</div>` : ''}
+      <div class="facts"><button class="btn sm primary" data-action="log" data-id="${c.id}">Registrar contacto</button><button class="btn sm" data-action="fu-snooze" data-id="${c.id}" data-days="1">Mañana</button><button class="btn sm" data-action="fu-snooze" data-id="${c.id}" data-days="7">+1 semana</button>${c.email ? `<a class="btn sm" href="mailto:${esc(c.email)}">Correo</a>` : ''}${wa ? `<a class="btn sm" href="${esc(wa)}" target="_blank" rel="noopener">WhatsApp</a>` : ''}</div></div></li>`; };
+    return head('Seguimientos', 'A quién tienes que contactar y cuándo. Al registrar cada contacto defines el próximo, así nadie queda olvidado.', `<a class="btn" href="#personas">Personas</a><button class="btn primary" data-action="new" data-entity="interactions">${icon('plus')}Registrar contacto</button>`, 'CRM') +
+      `<div class="grid stats" style="margin-bottom:16px">${groups.slice(0, 3).map(([l, xs, lv]) => `<div class="card kpi mini"><div class="l">${l}</div><div class="v ${lv === 'bad' && xs.length ? 'down' : ''}">${xs.length}</div></div>`).join('')}<div class="card kpi mini"><div class="l">Sin seguimiento</div><div class="v">${without.length}</div></div></div>
+      <div class="grid g-main"><div class="stack">${groups.filter(([, xs]) => xs.length).map(([l, xs]) => `<div class="card"><div class="ch"><h2>${l}</h2><span class="pill">${xs.length}</span></div><ul class="list">${xs.map(row).join('')}</ul></div>`).join('') || '<div class="card empty big">' + icon('ok') + '<div><strong>Sin seguimientos pendientes.</strong><br>Cuando registres un contacto con fecha de seguimiento, aparece aquí.</div></div>'}</div>
+      <div class="card" style="align-self:start"><div class="ch"><h2>Sin próximo paso</h2><span class="pill">${without.length}</span></div>${without.length ? `<ul class="list compact">${without.slice(0, 12).map((c) => `<li><div class="grow"><a class="t" href="#persona/${c.id}" style="color:inherit;text-decoration:none">${esc(c.name)}</a><div class="m">${esc(c.type)}</div></div><button class="btn sm" data-action="fu-snooze" data-id="${c.id}" data-days="3">En 3 días</button></li>`).join('')}</ul>` : '<div class="empty">Todos tienen un próximo paso.</div>'}</div></div>`;
+  };
+
+  /* Importar personas desde una lista pegada (Excel, Google Sheets o CSV) */
+  function openImportDrawer() {
+    openDrawer(`<header><div><div class="small muted">CRM</div><h2>Importar personas</h2></div><button class="iconbtn" data-action="close" aria-label="Cerrar">✕</button></header>
+      <div class="body"><p class="muted" style="margin-top:0">Copia las filas desde Excel o Google Sheets y pégalas aquí. Si la primera fila tiene títulos (nombre, correo, teléfono, tipo, etiquetas, país, origen), se usan para ubicar cada dato; si no, se lee nombre, correo y teléfono en ese orden. Las personas que ya existen (mismo correo) se actualizan.</p>
+      <div class="fgrid"><div class="field"><label>Tipo por defecto</label><select id="impType">${CONTACT_TYPES.map((t) => `<option ${t === 'Alumno/a' ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
+      <div class="field"><label>Etiqueta para todas (opcional)</label><input id="impTag" placeholder="Curso 2027"></div>
+      <div class="field full"><textarea id="impText" rows="12" placeholder="Nombre	Correo	Teléfono"></textarea></div></div></div>
+      <footer><button class="btn" data-action="close">Cancelar</button><button class="btn primary" data-action="crm-import-run">Importar</button></footer>`);
+    $('#impText').focus();
+  }
+  function runImport() {
+    const txt = $('#impText').value.trim(); if (!txt) { toast('Pega primero la lista'); return; }
+    const lines = txt.split(/\r?\n/).filter((l) => l.trim());
+    const sep = lines[0].includes('\t') ? '\t' : lines[0].includes(';') ? ';' : ',';
+    const cells = (l) => l.split(sep).map((x) => x.trim().replace(/^"|"$/g, ''));
+    const hdr = cells(lines[0]).map((h) => h.toLowerCase());
+    const hasHdr = hdr.some((h) => /nombre|name|correo|e-?mail|tel|tipo|etiqueta/.test(h));
+    const idx = (re, def) => { const i = hdr.findIndex((h) => re.test(h)); return hasHdr ? i : def; };
+    const col = { name: idx(/nombre|name/, 0), email: idx(/correo|e-?mail|mail/, 1), phone: idx(/tel|phone|celular|whats/, 2), type: idx(/tipo|type/, -1), tags: idx(/etiqueta|tag/, -1), country: idx(/pa[ií]s|country/, -1), source: idx(/origen|fuente|source/, -1), notes: idx(/nota|note/, -1) };
+    const defType = $('#impType').value; const tag = $('#impTag').value.trim();
+    let added = 0, updated = 0;
+    withUndo(['contacts'], () => {
+      lines.slice(hasHdr ? 1 : 0).forEach((l) => {
+        const r = cells(l); const g = (k) => (col[k] >= 0 ? r[col[k]] || '' : '');
+        const name = g('name'); const email = g('email').toLowerCase(); if (!name && !email) return;
+        let c = email ? S.contacts.find((x) => String(x.email || '').toLowerCase() === email) : S.contacts.find((x) => x.name.toLowerCase() === name.toLowerCase());
+        const type = CONTACT_TYPES.find((t) => t.toLowerCase().startsWith(g('type').toLowerCase().slice(0, 5)) && g('type')) || defType;
+        const tags = [g('tags'), tag].filter(Boolean).join(', ');
+        if (c) { Object.assign(c, { name: name || c.name, phone: g('phone') || c.phone, country: g('country') || c.country, source: g('source') || c.source, tags: [c.tags, tags].filter(Boolean).join(', ') }); updated++; }
+        else { S.contacts.push({ id: uid(), name: name || email, email, phone: g('phone'), type, stage: /alumno|cliente/i.test(type) ? 'activo' : 'nuevo', brand: defBrand(), country: g('country'), source: g('source') || 'Importación', tags, notes: g('notes'), created: today() }); added++; }
+      });
+    }, () => `${plural(added, 'persona importada', 'personas importadas')}${updated ? `, ${updated} ${updated === 1 ? 'actualizada' : 'actualizadas'}` : ''}`);
+    closeDrawer();
+  }
+
   VIEWS.recursos = () => {
     const list = byBrand(S.resources); const cats = [...new Set(list.map((r) => r.category))];
     return head('Recursos y enlaces', 'Plataformas, cuentas y documentos clave a un clic.', `<button class="btn primary" data-action="new" data-entity="resources">${icon('plus')}Recurso</button>`) +
@@ -1069,7 +1248,7 @@
         <div class="stack">
           <div class="card"><h2 style="margin-bottom:8px">Copia de seguridad</h2><p class="muted" style="margin-top:0">Descarga todos tus datos en un archivo JSON o restaura una copia anterior.</p><div class="row"><button class="btn primary" data-action="export">Descargar copia</button><button class="btn" data-action="import">Restaurar copia</button></div></div>
           <div class="card"><h2 style="margin-bottom:8px">Limpieza</h2><div class="row"><button class="btn" data-action="clear-demo" ${demo ? '' : 'disabled'}>Eliminar datos de ejemplo</button><button class="btn" data-action="reset">Restaurar datos iniciales</button><button class="btn danger" data-action="wipe">Borrar todo</button></div></div>
-          <div class="card"><h2 style="margin-bottom:4px">Resumen</h2><ul class="list">${[['projects', 'Proyectos'], ['tasks', 'Tareas'], ['workflows', 'Workflows'], ['items', 'Ítems de workflows'], ['agents', 'Agentes'], ['reports', 'Informes de correcciones'], ['posts', 'Publicaciones'], ['transactions', 'Movimientos'], ['metrics', 'Registros de métricas'], ['contacts', 'Contactos'], ['resources', 'Recursos']].map(([k, l]) => `<li><span class="grow">${l}</span><strong>${S[k].length}</strong></li>`).join('')}</ul></div>
+          <div class="card"><h2 style="margin-bottom:4px">Resumen</h2><ul class="list">${[['projects', 'Proyectos'], ['tasks', 'Tareas'], ['workflows', 'Workflows'], ['items', 'Ítems de workflows'], ['agents', 'Agentes'], ['reports', 'Informes de correcciones'], ['posts', 'Publicaciones'], ['transactions', 'Movimientos'], ['metrics', 'Registros de métricas'], ['contacts', 'Personas'], ['interactions', 'Contactos registrados'], ['resources', 'Recursos']].map(([k, l]) => `<li><span class="grow">${l}</span><strong>${S[k].length}</strong></li>`).join('')}</ul></div>
         </div>
       </div>`;
   };
@@ -1077,7 +1256,7 @@
   /* ================= Modo conectado (página publicada en Claude) =================
      db: datos sincronizados entre dispositivos (solo la dueña lee y escribe).
      mcp: lectura en vivo de Google Calendar, agentes y sesiones de Claude y, si se activa, Gmail. */
-  const DB_KEYS = ['settings', 'projects', 'tasks', 'posts', 'transactions', 'metrics', 'contacts', 'resources', 'workflows', 'items', 'agents', 'reports', 'activity', 'meta'];
+  const DB_KEYS = ['settings', 'projects', 'tasks', 'posts', 'transactions', 'metrics', 'contacts', 'interactions', 'resources', 'workflows', 'items', 'agents', 'reports', 'activity', 'meta'];
   const LIVE = { on: false, db: null, mcp: null, written: {}, queue: new Set(), writing: false, at: null, busy: false,
     src: { cal: { state: 'idle' }, ccr: { state: 'idle' }, ses: { state: 'idle' }, mail: { state: 'off' } },
     events: [], sessions: [], results: {}, mail: [] };
@@ -1218,16 +1397,27 @@
     LIVE.events = all.filter((e) => e.status !== 'cancelled' && evStart(e)).sort((a, b) => evStart(a) - evStart(b));
     // Sesiones de consulta: entran solas en Captación y en Contactos
     let changed = false;
-    LIVE.events.filter((e) => evKind(e) === 'consulta').forEach((e) => {
-      const d = evStart(e); const day = iso(d); const key = 'gcal:' + e.id;
+    const upsertPerson = (email, name, type, stage, d) => {
+      const em = String(email || '').toLowerCase(); const key = 'gcal:' + (em || name).toLowerCase();
+      let c = S.contacts.find((x) => (em && String(x.email || '').toLowerCase() === em) || x.key === key);
+      if (!c) { c = { id: uid(), key, name, type, stage, brand: 'pd', email: em, source: 'Google Calendar', created: today(), followup: type === 'Interesado/a' ? iso(addDays(d, 1)) : '', nextAction: type === 'Interesado/a' ? 'Enviar la propuesta después de la sesión de consultas' : '' }; S.contacts.push(c); changed = true; }
+      else if (type === 'Alumno/a' && c.type === 'Interesado/a') { c.type = 'Alumno/a'; c.stage = 'activo'; changed = true; }
+      return c;
+    };
+    LIVE.events.filter((e) => ['consulta', 'devolucion'].includes(evKind(e))).forEach((e) => {
+      const d = evStart(e); const day = iso(d); const key = 'gcal:' + e.id; const kind = evKind(e);
       const guest = (e.attendees || []).find((a) => !a.self && !a.organizer) || {};
-      const nameM = /\(([^)]+)\)\s*$/.exec(e.summary || ''); const who = nameM ? nameM[1] : (guest.displayName || guest.email || 'Consulta');
-      if (!S.items.some((i) => i.key === key)) {
-        S.items.push({ id: uid(), key, wf: 'wf-captacion', stage: 'reunion', title: `Sesión de consultas · ${who}`, brand: 'pd', owner: 'Carolina', due: day, link: e.htmlLink || '', notes: `Agendada en Google Calendar para el ${fmtDate(day)} a las ${hhmm(d)} hs.` });
+      const nameM = /\(([^)]+)\)\s*$/.exec(e.summary || ''); const who = nameM ? nameM[1] : (guest.displayName || guest.email || (kind === 'consulta' ? 'Consulta' : 'Alumno/a'));
+      const c = upsertPerson(guest.email, who, kind === 'consulta' ? 'Interesado/a' : 'Alumno/a', kind === 'consulta' ? 'reunion' : 'activo', d);
+      if (kind === 'consulta' && !S.items.some((i) => i.key === key)) {
+        S.items.push({ id: uid(), key, wf: 'wf-captacion', stage: 'reunion', title: `Sesión de consultas · ${who}`, brand: 'pd', owner: 'Carolina', due: day, contact: c.id, link: e.htmlLink || '', notes: `Agendada en Google Calendar para el ${fmtDate(day)} a las ${hhmm(d)} hs.` });
         logActivity('Google Calendar', `Nueva sesión de consultas: ${who} (${fmtDate(day)})`, 'info'); changed = true;
       }
-      const ck = 'gcal:' + (guest.email || who).toLowerCase();
-      if (!S.contacts.some((c) => c.key === ck)) { S.contacts.push({ id: uid(), key: ck, name: who, type: 'Interesado/a', brand: 'pd', email: guest.email || '', followup: iso(addDays(d, 1)), notes: `Sesión de consultas del ${fmtDate(day)}.` }); changed = true; }
+      // cuando la reunión ya ocurrió, queda en la historia de la persona
+      if (d <= new Date() && !S.interactions.some((i) => i.key === key)) {
+        S.interactions.push({ id: uid(), key, contact: c.id, type: kind === 'consulta' ? 'reunion' : 'clase', date: day, time: hhmm(d), summary: kind === 'consulta' ? 'Sesión de consultas por Google Meet' : 'Devolución y consultas de ejercicios' });
+        if (!c.lastContact || c.lastContact < day) c.lastContact = day; changed = true;
+      }
     });
     return changed;
   }
@@ -1244,7 +1434,7 @@
     if (LIVE.mailAccount && LIVE.mailAccount !== want) { LIVE.mail = []; throw Object.assign(new Error('cuenta'), { code: 'wrong_account', account: LIVE.mailAccount, want }); }
     const q = S.settings.mailQuery || 'to:contacto@prepdiplomacia.com in:inbox is:unread -category:promotions -category:social newer_than:7d';
     const o = await call(GMAIL, 'search_threads', { query: q, pageSize: 25, view: 'THREAD_VIEW_SUMMARY' });
-    LIVE.mail = (o && o.threads || []).map((t) => { const m = (t.messages || [])[0] || {}; const from = (m.addressDisplayNames || []).find((x) => x.emailAddress === m.sender) || {}; return { id: t.id, subject: decodeEnt(m.subject) || '(sin asunto)', from: from.displayName || m.sender || '', date: m.date || '', snippet: decodeEnt(m.snippet).slice(0, 160), url: t.viewUrl || m.viewUrl || '' }; });
+    LIVE.mail = (o && o.threads || []).map((t) => { const m = (t.messages || [])[0] || {}; const from = (m.addressDisplayNames || []).find((x) => x.emailAddress === m.sender) || {}; return { id: t.id, subject: decodeEnt(m.subject) || '(sin asunto)', fromEmail: String(m.sender || '').toLowerCase(), from: from.displayName || m.sender || '', date: m.date || '', snippet: decodeEnt(m.snippet).slice(0, 160), url: t.viewUrl || m.viewUrl || '' }; });
   }
 
   async function refreshLive(fromClick) {
@@ -1340,13 +1530,13 @@
   /* ================= Render y navegación ================= */
   function render() {
     const rep = latestReport(); const tot = reportTotals(rep);
-    const counts = { tareas: [byBrand(S.tasks).filter(isLate).length, true], correcciones: [ui.brand === 'ct' ? 0 : tot.revision, rep && rep.status === 'falla'], agentes: [byBrand(S.agents).filter((a) => a.lastStatus === 'falla').length, true], workflows: [byBrand(S.workflows).length, false] };
-    const active = ui.route === 'workflow' ? (ui.param === 'wf-corr' ? 'correcciones' : 'workflows') : ui.route;
+    const counts = { seguimientos: [byBrand(S.contacts).filter((c) => c.followup && c.followup <= today()).length, true], personas: [byBrand(S.contacts).length, false], tareas: [byBrand(S.tasks).filter(isLate).length, true], correcciones: [ui.brand === 'ct' ? 0 : tot.revision, rep && rep.status === 'falla'], agentes: [byBrand(S.agents).filter((a) => a.lastStatus === 'falla').length, true], workflows: [byBrand(S.workflows).length, false] };
+    const active = ui.route === 'workflow' ? (ui.param === 'wf-corr' ? 'correcciones' : 'workflows') : ui.route === 'persona' || ui.route === 'contactos' ? 'personas' : ui.route;
     $('#nav').innerHTML = NAV.map(([g, items]) => `<div class="grp">${g}</div>` + items.map(([k, l]) => { const c = counts[k]; return `<a href="#${k}" class="${active === k ? 'active' : ''}">${icon(k)}<span>${l}</span>${c && c[0] ? `<span class="count ${c[1] ? 'alert' : ''}">${c[0]}</span>` : ''}</a>`; }).join('')).join('');
     $('#brandFilter').innerHTML = [['all', 'Ambas']].concat(BRANDS.map((b) => [b.id, b.short])).map(([id, n]) => `<button class="${ui.brand === id ? 'active' : ''}" data-action="brand" data-v="${id}">${id === 'all' ? '' : brandDot(id)}${esc(n)}</button>`).join('');
     $('#themeBtn').innerHTML = icon(document.documentElement.dataset.theme === 'dark' ? 'sun' : 'moon');
     $('#brandFilterSide').innerHTML = $('#brandFilter').innerHTML;
-    const tabs = [['inicio', 'Hoy', 'inicio'], ['agenda', 'Agenda', 'agenda'], ['correcciones', 'Correcciones', 'correcciones'], ['tareas', 'Tareas', 'tareas']];
+    const tabs = [['inicio', 'Hoy', 'inicio'], ['agenda', 'Agenda', 'agenda'], ['seguimientos', 'Seguimientos', 'seguimientos'], ['correcciones', 'Correcciones', 'correcciones']];
     $('#tabbar').innerHTML = tabs.map(([k, l, ic]) => { const c = counts[k]; return `<a href="#${k}" class="${active === k ? 'active' : ''}">${icon(ic)}<span>${l}</span>${c && c[0] ? `<b class="${c[1] ? 'alert' : ''}">${c[0] > 99 ? '99+' : c[0]}</b>` : ''}</a>`; }).join('') + `<button data-action="menu">${icon('workflows')}<span>Más</span></button>`;
     $('#sideFoot').innerHTML = footHtml();
     $('#main').innerHTML = (VIEWS[ui.route] || VIEWS.inicio)();
@@ -1413,7 +1603,16 @@
       const o = Object.assign({ id: (entity === 'workflows' ? 'wf-' : '') + uid() }, data, entity === 'agents' ? { manual: true } : {}); S[entity].push(o);
       if (entity === 'tasks' && o.status === 'hecha') spawnNext(o);
     }
-    save(); closeDrawer(); render(); toast('Guardado');
+    if (entity === 'interactions') {
+      const c = S.contacts.find((x) => x.id === data.contact);
+      if (c) {
+        if (!c.lastContact || data.date > c.lastContact) c.lastContact = data.date;
+        c.followup = data.nextFollowup || (c.followup && c.followup <= today() ? '' : c.followup);
+        if (data.nextFollowup) c.nextAction = data.nextAction || ''; else if (!c.followup) c.nextAction = '';
+        if ((c.stage || 'nuevo') === 'nuevo') c.stage = 'contactado';
+      }
+    }
+    save(); closeDrawer(); render(); toast(entity === 'interactions' ? 'Contacto registrado' : 'Guardado');
   }
 
   /* Informe del agente de correcciones */
@@ -1463,7 +1662,7 @@
       ...NAV.flatMap(([, items]) => items.map(([k, l]) => go('#' + k, l, k))),
       ...S.workflows.map((w) => go('#workflow/' + w.id, 'Workflow · ' + w.name, 'workflows')),
       nw('tasks', 'Nueva tarea'), nw('items', 'Nuevo ítem de workflow'), nw('posts', 'Nueva publicación'), nw('transactions', 'Nuevo movimiento contable'),
-      nw('projects', 'Nuevo proyecto'), nw('contacts', 'Nuevo contacto'), nw('metrics', 'Registrar métrica'), nw('resources', 'Nuevo recurso'), nw('workflows', 'Nuevo workflow'), nw('agents', 'Nuevo agente'),
+      nw('projects', 'Nuevo proyecto'), nw('contacts', 'Nueva persona'), nw('interactions', 'Registrar un contacto con una persona'), { g: 'Crear', l: 'Importar personas desde una lista', ic: 'personas', run: openImportDrawer }, nw('metrics', 'Registrar métrica'), nw('resources', 'Nuevo recurso'), nw('workflows', 'Nuevo workflow'), nw('agents', 'Nuevo agente'),
       { g: 'Crear', l: 'Pegar informe del agente de correcciones', ic: 'paste', run: openReportDrawer },
       { g: 'Acciones', l: 'Cambiar tema claro u oscuro', ic: 'moon', run: toggleTheme },
       { g: 'Acciones', l: 'Actualizar conexiones (agenda, agentes, sesiones)', ic: 'agentes', run: () => refreshLive(true) },
@@ -1472,10 +1671,10 @@
     ];
   }
   function entityHits(q) {
-    const defs = [['tasks', 'Tareas', 'title', 'tareas'], ['items', 'Workflows', 'title', 'workflows'], ['projects', 'Proyectos', 'name', 'proyectos'], ['contacts', 'Contactos', 'name', 'contactos'], ['posts', 'Publicaciones', 'title', 'marketing'], ['transactions', 'Movimientos', 'desc', 'contabilidad'], ['resources', 'Recursos', 'name', 'recursos'], ['agents', 'Agentes', 'name', 'agentes']];
+    const defs = [['tasks', 'Tareas', 'title', 'tareas'], ['items', 'Workflows', 'title', 'workflows'], ['projects', 'Proyectos', 'name', 'proyectos'], ['contacts', 'Personas', 'name', 'personas'], ['interactions', 'Historia', 'summary', 'contactos'], ['posts', 'Publicaciones', 'title', 'marketing'], ['transactions', 'Movimientos', 'desc', 'contabilidad'], ['resources', 'Recursos', 'name', 'recursos'], ['agents', 'Agentes', 'name', 'agentes']];
     const out = [];
     defs.forEach(([e, g, k, ic]) => byBrand(S[e]).filter((o) => [o[k], o.notes, o.desc, o.email, o.url].some((v) => String(v || '').toLowerCase().includes(q))).slice(0, 5)
-      .forEach((o) => out.push({ g, l: o[k], ic, k: e === 'tasks' && o.due ? fmtDate(o.due) : e === 'transactions' ? money(o.amount, o.currency) : '', run: () => openForm(e, o.id) })));
+      .forEach((o) => out.push({ g, l: o[k], ic, k: e === 'tasks' && o.due ? fmtDate(o.due) : e === 'transactions' ? money(o.amount, o.currency) : e === 'contacts' ? o.type : '', run: () => (e === 'contacts' ? (location.hash = '#persona/' + o.id) : openForm(e, o.id)) })));
     return out;
   }
   function openPalette(mode) {
@@ -1508,12 +1707,13 @@
   function moveTo(entity, id, status) {
     if (entity === 'tasks') return setTaskStatus(id, status);
     const o = S[entity].find((x) => x.id === id); if (!o) return;
-    if (entity === 'items') o.stage = status; else o.status = status;
+    if (entity === 'items' || entity === 'contacts') o.stage = status; else o.status = status;
     o.updated = today(); save(); render();
   }
   function advance(id) {
     const it = S.items.find((x) => x.id === id);
     if (it) { const w = wfById(it.wf); const i = w.stages.findIndex((s) => s.id === it.stage); if (w.stages[i + 1]) { moveTo('items', id, w.stages[i + 1].id); toast(`Pasó a “${w.stages[i + 1].name}”`); } return; }
+    const ct = S.contacts.find((x) => x.id === id); if (ct) { const i = CRM_STAGES.findIndex((s2) => s2[0] === (ct.stage || 'nuevo')); if (CRM_STAGES[i + 1]) moveTo('contacts', id, CRM_STAGES[i + 1][0]); return; }
     const t = S.tasks.find((x) => x.id === id); if (t) { const i = TASK_STATUS.findIndex((s) => s[0] === t.status); if (TASK_STATUS[i + 1]) setTaskStatus(id, TASK_STATUS[i + 1][0]); return; }
     const p = S.posts.find((x) => x.id === id); if (p) { const i = POST_STATUS.findIndex((s) => s[0] === p.status); if (POST_STATUS[i + 1]) moveTo('posts', id, POST_STATUS[i + 1][0]); }
   }
@@ -1542,7 +1742,7 @@
   function withUndo(keys, fn, msg) {
     const snap = {}; keys.forEach((k) => { snap[k] = JSON.stringify(S[k]); });
     fn(); save(); render();
-    toast(msg, () => { keys.forEach((k) => { S[k] = JSON.parse(snap[k]); }); save(); render(); toast('Cambio deshecho'); });
+    toast(typeof msg === 'function' ? msg() : msg, () => { keys.forEach((k) => { S[k] = JSON.parse(snap[k]); }); save(); render(); toast('Cambio deshecho'); });
   }
 
   /* ================= Eventos ================= */
@@ -1560,7 +1760,11 @@
       case 'go': location.hash = el.dataset.href; break;
       case 'brand': ui.brand = el.dataset.v; saveUi(); render(); break;
       case 'set': ui[el.dataset.k] = el.dataset.v; saveUi(); render(); break;
-      case 'new': openForm(el.dataset.entity, null, Object.assign({}, el.dataset.project ? { project: el.dataset.project } : {}, el.dataset.brand ? { brand: el.dataset.brand } : {}, el.dataset.wf ? { wf: el.dataset.wf } : {})); break;
+      case 'new': openForm(el.dataset.entity, null, Object.assign({}, el.dataset.project ? { project: el.dataset.project } : {}, el.dataset.brand ? { brand: el.dataset.brand } : {}, el.dataset.wf ? { wf: el.dataset.wf } : {}, el.dataset.contact ? { contact: el.dataset.contact } : {})); break;
+      case 'log': e.stopPropagation(); openForm('interactions', null, { contact: el.dataset.id, date: today(), type: 'llamada' }); break;
+      case 'fu-snooze': { e.stopPropagation(); const c = S.contacts.find((x) => x.id === el.dataset.id); const n = Number(el.dataset.days || 1); if (c) withUndo(['contacts'], () => { c.followup = iso(addDays(new Date(), n)); }, n === 1 ? 'Seguimiento para mañana' : `Seguimiento en ${n} días`); break; }
+      case 'crm-import': openImportDrawer(); break;
+      case 'crm-import-run': runImport(); break;
       case 'edit': e.stopPropagation(); openForm(el.dataset.entity, el.dataset.id); break;
       case 'advance': { e.stopPropagation(); const snap = { items: JSON.stringify(S.items), tasks: JSON.stringify(S.tasks), posts: JSON.stringify(S.posts) }; advance(el.dataset.id); toast('Avanzó a la etapa siguiente', () => { Object.keys(snap).forEach((k) => { S[k] = JSON.parse(snap[k]); }); save(); render(); }); break; }
       case 'del': {
@@ -1622,6 +1826,10 @@
     r.readAsText(file);
   });
 
+  let crmT;
+  document.addEventListener('input', (e) => {
+    if (e.target && e.target.id === 'crmSearch') { clearTimeout(crmT); const v = e.target.value; crmT = setTimeout(() => { ui.crmQ = v; render(); const el = $('#crmSearch'); if (el) { el.focus(); el.setSelectionRange(v.length, v.length); } }, 180); }
+  });
   $('#paletteInput').addEventListener('input', () => { palSel = 0; renderPalette(); });
   $('#paletteInput').addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); palSel = Math.min(palSel + 1, palItems.length - 1); renderPalette(); }
