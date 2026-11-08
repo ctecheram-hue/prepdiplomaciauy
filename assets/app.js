@@ -304,6 +304,7 @@
   function defaultSettings() {
     return {
       usdRate: 40, eurRate: 44, owner: 'Carolina', tz: 'Africa/Casablanca', gcalMode: 'WEEK',
+      mailEnabled: true, mailAccount: 'contacto@prepdiplomacia.com', mailQuery: 'to:contacto@prepdiplomacia.com in:inbox is:unread -category:promotions -category:social newer_than:7d',
       calendars: [
         { id: 'contacto@prepdiplomacia.com', name: 'Agenda principal', color: '#153D63', on: true },
         { id: 'c_classroomaa005f5c@group.calendar.google.com', name: 'Prep Diplomacia Uy · Curso 2027', color: '#B2914A', on: true },
@@ -781,6 +782,7 @@
             ${LIVE.mcp ? liveAgendaHtml(2) : `<iframe class="gcal" src="${esc(gcalEmbed('AGENDA'))}" height="340" loading="lazy" title="Google Calendar"></iframe>
             <div class="small muted" style="margin-top:6px">Desde Google Calendar. Si no ves tus eventos, inicia sesión en Google en este navegador.</div>`}
           </div>
+          ${LIVE.mcp && S.settings.mailEnabled ? `<div class="card"><div class="ch"><h2>${icon('inbox')}Correo pendiente</h2><span class="small muted">${esc(S.settings.mailAccount || '')}</span></div>${liveMailHtml(5)}</div>` : ''}
           <div class="card"><div class="ch"><h2>${icon('inbox')}Actividad reciente</h2><span class="pill ${REMOTE || LIVE.mcp ? 'ok' : ''}">${REMOTE || LIVE.mcp ? 'En vivo' : 'Local'}</span></div>
             ${S.activity.length ? `<ul class="list">${S.activity.slice(0, 6).map((a) => { const d = new Date(a.at); return `<li><span class="dot" style="background:${a.kind === 'bad' ? 'var(--bad)' : a.kind === 'ia' ? 'var(--ia)' : 'var(--ok)'}"></span><div class="grow"><div class="t" style="font-weight:600;font-size:13px">${esc(a.text)}</div><div class="m">${esc(a.source)} · ${fmtDate(iso(d))} ${pad(d.getHours())}:${pad(d.getMinutes())} hs</div></div></li>`; }).join('')}</ul>` : `<div class="empty">${REMOTE || LIVE.mcp ? 'Aquí aparece lo que hacen tus agentes, tu agenda y tus sesiones de Claude.' : 'En la versión publicada en Claude, aquí aparece en vivo lo que hacen tus agentes.'}</div>`}
           </div>
@@ -1034,9 +1036,10 @@
     const calText = (S.settings.calendars || []).map((c) => `${c.id} | ${c.name} | ${c.color}${c.on === false ? ' | oculto' : ''}`).join('\n');
     return head('Ajustes y respaldo', LIVE.on ? 'Tus datos se guardan en la base del panel y se sincronizan entre tus dispositivos.' : 'Los datos se guardan en este navegador. Descarga una copia con regularidad para no perderlos y para usarlos en otro equipo.') +
       `<div class="grid g-2" style="margin-bottom:16px"><div class="card"><h2 style="margin-bottom:6px">Conexiones automáticas</h2>${connectionsHtml()}</div>
-       <div class="card"><h2 style="margin-bottom:6px">Correo</h2><p class="muted" style="margin-top:0">El panel lee el Gmail conectado a tu cuenta de Claude. Actívalo solo si esa cuenta es la de Prep Diplomacia Uy.</p>
+       <div class="card"><h2 style="margin-bottom:6px">Correo</h2><p class="muted" style="margin-top:0">El panel lee el Gmail conectado a Claude y solo muestra correo si la cuenta conectada coincide con la indicada aquí. Con cualquier otra cuenta, no muestra nada.</p>
        <form id="mailForm" class="fgrid"><div class="field full"><label><input type="checkbox" name="mailEnabled" ${S.settings.mailEnabled ? 'checked' : ''}> Mostrar el correo pendiente en el panel</label></div>
-       <div class="field full"><label>Filtro de búsqueda de Gmail</label><input name="mailQuery" value="${esc(S.settings.mailQuery || 'in:inbox is:unread -category:promotions -category:social newer_than:7d')}"></div>
+       <div class="field full"><label>Cuenta de correo del panel</label><input name="mailAccount" type="email" value="${esc(S.settings.mailAccount || '')}"></div>
+       <div class="field full"><label>Filtro de búsqueda de Gmail</label><input name="mailQuery" value="${esc(S.settings.mailQuery || 'to:contacto@prepdiplomacia.com in:inbox is:unread -category:promotions -category:social newer_than:7d')}"></div>
        <div class="field full"><button class="btn primary" type="submit" style="justify-self:start">Guardar</button></div></form></div></div>` +
       `${demo ? `<div class="note">Hay <strong>${demo}</strong> registros de ejemplo (marcados “ejemplo”). Cuando cargues tus datos reales, elimínalos con el botón de abajo.</div>` : ''}
       <div class="grid g-2">
@@ -1110,6 +1113,7 @@
     if (c === 'not_in_manifest' || c === 'approval_required' || c === 'consent_required') return `Falta tu permiso para usar ${server} en este panel.`;
     if (c === 'blocked_by_policy') return `Tu organización bloquea ${server} para este panel.`;
     if (c === 'not_granted' || c === 'capability_disabled' || c === 'capability_removed') return 'Las conexiones no están disponibles en esta vista.';
+    if (c === 'wrong_account') return `El Gmail conectado a Claude es ${e.account}. Para ver tu correo, conecta ${e.want} en claude.ai › Configuración › Conectores y elígelo para este panel.`;
     if (c === 'tool_error') return `${server} respondió con un error.`;
     return `${server} no respondió (${c || 'error'}). Se reintenta en la próxima actualización.`;
   }
@@ -1214,8 +1218,16 @@
   }
 
   /* --- Gmail (apagado hasta que se confirme la cuenta) --- */
+  // Comprueba qué cuenta tiene conectada el Gmail de Claude antes de mostrar nada
+  const accountOf = (t) => { const m = /authuser=([^&#|]+)/.exec((t && (t.viewUrl || (t.messages && t.messages[0] && t.messages[0].viewUrl))) || ''); return m ? decodeURIComponent(m[1]).toLowerCase() : ''; };
   async function syncMail() {
-    const q = S.settings.mailQuery || 'in:inbox is:unread -category:promotions -category:social newer_than:7d';
+    const want = String(S.settings.mailAccount || 'contacto@prepdiplomacia.com').toLowerCase();
+    if (LIVE.mailAccount === undefined) {
+      const probe = await call(GMAIL, 'search_threads', { query: 'in:inbox', pageSize: 1, view: 'THREAD_VIEW_METADATA_ONLY' });
+      LIVE.mailAccount = accountOf((probe && probe.threads || [])[0]);
+    }
+    if (LIVE.mailAccount && LIVE.mailAccount !== want) { LIVE.mail = []; throw Object.assign(new Error('cuenta'), { code: 'wrong_account', account: LIVE.mailAccount, want }); }
+    const q = S.settings.mailQuery || 'to:contacto@prepdiplomacia.com in:inbox is:unread -category:promotions -category:social newer_than:7d';
     const o = await call(GMAIL, 'search_threads', { query: q, pageSize: 25, view: 'THREAD_VIEW_SUMMARY' });
     LIVE.mail = (o && o.threads || []).map((t) => { const m = (t.messages || [])[0] || {}; const from = (m.addressDisplayNames || []).find((x) => x.emailAddress === m.sender) || {}; return { id: t.id, subject: decodeEnt(m.subject) || '(sin asunto)', from: from.displayName || m.sender || '', date: m.date || '', snippet: decodeEnt(m.snippet).slice(0, 160), url: t.viewUrl || m.viewUrl || '' }; });
   }
@@ -1296,7 +1308,7 @@
       return `<li><span class="dot" style="background:${waiting ? 'var(--warn)' : working ? 'var(--ia)' : 'var(--ok)'}"></span><div class="grow"><div class="t">${esc(s.title)}</div><div class="m">${waiting ? '<span class="pill warn">Espera tu respuesta</span>' : working ? '<span class="pill ia">Trabajando</span>' : ''}${d ? `<span>${fmtDate(iso(d))} ${hhmm(d)} hs</span>` : ''}</div>${s.needs || s.recent ? `<div class="small muted" style="margin-top:2px">${esc(String(s.needs || s.recent).slice(0, 180))}</div>` : ''}</div><a class="btn sm" href="${esc(sessionUrl(s.id))}" target="_blank" rel="noopener">Abrir</a></li>`; }).join('') + '</ul>';
   }
   function liveMailHtml(max) {
-    if (!S.settings.mailEnabled) return `<div class="empty">El correo está desactivado. Actívalo en <a href="#ajustes">Ajustes</a> cuando conectes la cuenta de Prep Diplomacia Uy.</div>`;
+    if (!S.settings.mailEnabled) return `<div class="empty">El correo está desactivado. Actívalo en <a href="#ajustes">Ajustes</a>.</div>`;
     const st = LIVE.src.mail;
     if (st.state === 'blocked') return `<div class="empty">${esc(st.msg)}<br><button class="btn sm primary" data-action="live-refresh" style="margin-top:8px">Permitir y cargar</button></div>`;
     if (st.state !== 'ok' && !LIVE.mail.length) return `<div class="empty">${esc(st.msg || 'Cargando…')}</div>`;
@@ -1559,7 +1571,7 @@
   document.addEventListener('submit', (e) => {
     e.preventDefault();
     if (e.target.id === 'entityForm') submitForm(e.target);
-    if (e.target.id === 'mailForm') { const f = e.target; S.settings.mailEnabled = f.mailEnabled.checked; S.settings.mailQuery = f.mailQuery.value.trim(); save(); if (S.settings.mailEnabled) refreshLive(true); else { LIVE.mail = []; LIVE.src.mail = { state: 'off' }; render(); } toast('Preferencias de correo guardadas'); }
+    if (e.target.id === 'mailForm') { const f = e.target; S.settings.mailEnabled = f.mailEnabled.checked; S.settings.mailQuery = f.mailQuery.value.trim(); S.settings.mailAccount = f.mailAccount.value.trim().toLowerCase() || 'contacto@prepdiplomacia.com'; LIVE.mailAccount = undefined; save(); if (S.settings.mailEnabled) refreshLive(true); else { LIVE.mail = []; LIVE.src.mail = { state: 'off' }; render(); } toast('Preferencias de correo guardadas'); }
     if (e.target.id === 'settingsForm') {
       const f = e.target;
       S.settings.owner = f.owner.value.trim(); S.settings.tz = f.tz.value.trim() || 'Africa/Casablanca';
